@@ -33,8 +33,12 @@ uint32_t raw_data_buffer_index = 0;
 
 TickType_t xLastWakeTime;
 
+
+//Funktionen initialisieren
 void send_to_data_buffer(uint16_t Data);
-uint32_t get_slope(uint16_t index_0to319 );
+//uint32_t get_slope(uint16_t index_0to319 );
+uint16_t idle_calculate_offset(uint16_t max, uint16_t min);
+bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t min_index);
 
 void vQuamDec(void* pvParameters)
 {
@@ -77,14 +81,9 @@ uint16_t get_data_from_buffer(uint32_t index_adress)
 
 void vQuamDecAnalysis(void* pvParameters)
 {
-	xLastWakeTime = xTaskGetTickCount();
-	uint32_t slope_value = 0; 
-	uint16_t max = 0;
-	uint16_t min = 0; 
-	while (1)
-	{
-		
-		
+	
+	
+	
 		/*Funktionen:	berechnen min max mit index Pointer min min max und inex übergeben siehe mail
 						(überprüfung ob wert valide ist)
 						mean berechnen mit min max 
@@ -125,50 +124,124 @@ void vQuamDecAnalysis(void* pvParameters)
 										
 	
 		*/
-		slope_value = get_slope(0);
-		max = slope_value >> 16;
-		min = slope_value; 
-
+	#define STATE_IDLE 1
+	#define STATE_START 2
+	xLastWakeTime = xTaskGetTickCount();
+	
+	
+	uint8_t State_Switch = 1; 
+	uint16_t idle_max_value = 0; 
+	uint16_t idle_min_value = 0; 
+	uint16_t idle_max_index = 0; 
+	uint16_t idle_min_index = 0; 
+	
+	uint16_t Index = 0; 
+	uint16_t DC_Offset = 0; 
+	while (1)
+	{
+		
+		switch(State_Switch)
+		{
+			case STATE_IDLE:
+			
+				Index = raw_data_buffer_index % 320;  //unnötig??
+				idle_get_min_max(40, &idle_max_value, &idle_min_value, &idle_max_index, &idle_min_index);
+				DC_Offset = idle_calculate_offset(idle_max_value, idle_min_value);
+			
+			break; 
+			
+			case STATE_START:
+			break;
+			
+			default:
+			break; 
+		}
 		vTaskDelayUntil( &xLastWakeTime, 5 / portTICK_RATE_MS);
 	}
 }
 
-uint32_t get_slope(uint16_t index_0to319 )  //
+
+uint16_t idle_calculate_offset(uint16_t max, uint16_t min)
 {
-	uint16_t y1 = 0;
-	uint16_t y2 = 0;
-	uint32_t slope_save = 0; 
-	uint16_t calculate_max = 0; 
-	uint16_t calculate_min = 0; 
-	uint32_t return_test = 0; 
-	for (uint8_t i = 0; i < 32; i++)
+	uint16_t dc_offset = 0; 
+	
+	dc_offset = ((max - min) / 2) + min; 
+	
+	return dc_offset; 
+}
+
+bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t min_index)
+{
+	uint16_t y1 = 0; 
+	uint16_t y2 = 0; 
+	uint16_t y1_index = 0; 
+	uint16_t y2_index = 0; 
+	
+	uint16_t max_safe = 0; 
+	uint16_t min_safe = 0; 
+	uint16_t max_index_safe = 0; 
+	uint16_t min_index_safe = 0; 
+	uint16_t kontrolle_max = 0; 
+	uint16_t kontrolle_min = 0; 
+	
+	
+	bool Error_Flag = pdFALSE; 
+	
+	for (uint8_t i = 0; i < 60; i++)
 	{
-		y1 = adc_rawdata_buffer[i];
-		y2 = adc_rawdata_buffer[i+1];
-		if (y2 > y1) //slope positive
+		y1_index = i+startindex;
+		y2_index = i+startindex+1;
+		y1 = adc_rawdata_buffer[y1_index];
+		y2 = adc_rawdata_buffer[y2_index];
+		if (y2 > y1)
 		{
-			slope_save = (slope_save << 1) | 0x0001; //1 an erster stelle, 1 für pos und 0 für neg slope
+			max_safe = y2; 
+			max_index_safe = y2_index; 
 		}
-		else //slope negative
+		else
 		{
-			slope_save = (slope_save << 1) & 0x0000; //0 an erster stelle
+			if (y2 < y1)
+			{
+				min_safe = y2; 
+				max_index_safe = y2_index; 
+			}
+			else
+			{
+				Error_Flag = pdTRUE;
+			}
 		}
 	}
-	for (uint8_t i = 0; i < 32; i++)
+
+	if (max_index_safe > 32) kontrolle_max = adc_rawdata_buffer[max_index_safe-32]; //darf ich das? max kontrolle
+	else kontrolle_max = adc_rawdata_buffer[max_index_safe+32];
+	
+	if (min_index_safe > 32) kontrolle_min = adc_rawdata_buffer[min_index_safe-32]; //min kontrolle
+	else kontrolle_min = adc_rawdata_buffer[min_index_safe+32];
+	
+	if ( (kontrolle_max > (max_safe-100)) & (kontrolle_max < (max_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler
 	{
-		if ( ( ((slope_save >> i) & 1) == 0) && (slope_save >> (i + 1) ) && (slope_save >> (i + 2) )    )  //wendepunkt, 0 = negativ, 1 = pos
-		{
-			calculate_max = adc_rawdata_buffer[i + 1]; //nächster wert nach wendepunkt
-			
-		}
-		if ( (slope_save >> i)  && ( (slope_save >> (i + 1)) == 0 ) && ((slope_save >> (i + 2)) == 0  )    )  //wendepunkt, 0 = negativ, 1 = pos
-		{
-			calculate_min = adc_rawdata_buffer[i + 1]; //nächster wert nach wendepunkt
-		}
+		
 	}
-	return_test = (  (calculate_max << 16)   |  ( calculate_min) );
-	return return_test; 
-	//return (  (calculate_max << 16)   |  ( calculate_min) );
+	else
+	{
+		Error_Flag = pdTRUE;
+	}
+	
+	if ( (kontrolle_min > (min_safe-100)) & (kontrolle_min < (min_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler
+	{
+		
+	}
+	else
+	{
+		Error_Flag = pdTRUE;
+	}
+	return Error_Flag; // 0 = ok, 1 = fehler
+}
+
+
+void get_slope(uint16_t index_0to319)  //
+{
+	
 }
 
 

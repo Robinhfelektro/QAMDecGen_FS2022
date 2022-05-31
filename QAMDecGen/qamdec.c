@@ -85,6 +85,46 @@ void vQuamDecAnalysis(void* pvParameters)
 	{
 		
 		
+		/*Funktionen:	berechnen min max mit index Pointer min min max und inex übergeben siehe mail
+						(überprüfung ob wert valide ist)
+						mean berechnen mit min max 
+						
+						
+		Programm		32 adc werte mit funktion analysieren --> Logik damit Ringbuffer nicht überholt werden kann
+						mean, max berechnen mit funktion
+						0 PUnkt mithilfe von Index herausfinden
+							jeweils 90 oder 180° sind innteressante Punkte verschoben
+						
+						
+			
+		1. Initialisierung mit Synchronisationssygnal. (z.B. 10 mal testen)
+		2. Datean aus Ringbuffer auswerten und speichern (symbol erkenne, error index wait)
+				- offetkorrektur
+				- fehrlüberüfung --> zurück zu modus init
+					- Wait auf ringbuffer
+				- Daten speichern von Symbol
+				
+			2.1 Warten auf Startsymbol
+			2.2 Startsymbol gekommen
+			
+				
+		3. Daten aus Speicher auswerten mithilfe Protokoll ()
+						
+		1. DC Offset mit Synchrosignal herausfinden mit einem 64 bit bereich. max wert -8 = 0phasendurchgang
+			--> sanity check +32 oder - 32 index muss wieder maximalwert sein
+						-Funktion Sanity check
+						-Min Max Berechnen Funktion
+						- 
+		2. Daten Signale auswerten mithilfe der Berechnenten 0 Punkte aus dem 1 modus berechen. Datensymbole abspeichern
+		
+		
+						- check ringbuffer überholen oder vielleicht Errorcheck? Index check
+						
+		3. Datensymbole in Protokoll umrechnen 
+		
+										
+	
+		*/
 		slope_value = get_slope(0);
 		max = slope_value >> 16;
 		min = slope_value; 
@@ -131,27 +171,6 @@ uint32_t get_slope(uint16_t index_0to319 )  //
 	//return (  (calculate_max << 16)   |  ( calculate_min) );
 }
 
-
-//uint32_t get_slope(uint16_t index_0to319 )  //
-//{
-	//uint16_t y1 = 0;
-	//uint16_t y2 = 0;
-	//uint32_t slope_save = 0; 
-	//for (uint8_t i = 0; i < 32; i++)
-	//{
-		//y1 = adc_rawdata_buffer[i];
-		//y2 = adc_rawdata_buffer[i+1];
-		//if (y2 > y1) //slope positive
-		//{
-			//slope_save = (slope_save << 1) | 1;
-		//}
-		//else //slope negative
-		//{
-			//slope_save = (slope_save << 1) | 0;
-		//}
-	//}
-	//return slope_save; 
-//}
 
 
 void get_sin_mean(uint16_t index)

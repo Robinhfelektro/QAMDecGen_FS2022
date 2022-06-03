@@ -137,6 +137,8 @@ void vQuamDecAnalysis(void* pvParameters)
 	
 	uint16_t Index = 0; 
 	uint16_t DC_Offset = 0; 
+	bool ErrorTest = pdFALSE; 
+	uint8_t ululu; 
 	while (1)
 	{
 		
@@ -145,7 +147,11 @@ void vQuamDecAnalysis(void* pvParameters)
 			case STATE_IDLE:
 			
 				Index = raw_data_buffer_index % 320;  //unnötig??
-				idle_get_min_max(40, &idle_max_value, &idle_min_value, &idle_max_index, &idle_min_index);
+				ErrorTest = idle_get_min_max(70, &idle_max_value, &idle_min_value, &idle_max_index, &idle_min_index);
+				if (ErrorTest == pdTRUE)
+				{
+					ululu = 1; 
+				}
 				DC_Offset = idle_calculate_offset(idle_max_value, idle_min_value);
 			
 			break; 
@@ -178,7 +184,7 @@ bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_
 	uint16_t y2_index = 0; 
 	
 	uint16_t max_safe = 0; 
-	uint16_t min_safe = 0; 
+	uint16_t min_safe = 4096; //für erste if abfrage
 	uint16_t max_index_safe = 0; 
 	uint16_t min_index_safe = 0; 
 	uint16_t kontrolle_max = 0; 
@@ -187,54 +193,58 @@ bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_
 	
 	bool Error_Flag = pdFALSE; 
 	
-	for (uint8_t i = 0; i < 60; i++)
+	for (uint8_t i = 0; i < 64; i++)
 	{
 		y1_index = i+startindex;
 		y2_index = i+startindex+1;
 		y1 = adc_rawdata_buffer[y1_index];
 		y2 = adc_rawdata_buffer[y2_index];
-		if (y2 > y1)
+		if ( y2 > y1 )
 		{
 			max_safe = y2; 
 			max_index_safe = y2_index; 
 		}
 		else
 		{
-			if (y2 < y1)
+			if ( (y2 < y1)  )
 			{
-				min_safe = y2; 
-				max_index_safe = y2_index; 
+				if ((y2 < min_safe))
+				{
+					min_safe = y2; 
+					min_index_safe = y2_index; 
+				}
+				
 			}
 			else
 			{
-				Error_Flag = pdTRUE;
+				return pdTRUE;
 			}
 		}
 	}
 
-	if (max_index_safe > 32) kontrolle_max = adc_rawdata_buffer[max_index_safe-32]; //darf ich das? max kontrolle
-	else kontrolle_max = adc_rawdata_buffer[max_index_safe+32];
-	
-	if (min_index_safe > 32) kontrolle_min = adc_rawdata_buffer[min_index_safe-32]; //min kontrolle
-	else kontrolle_min = adc_rawdata_buffer[min_index_safe+32];
+
+	kontrolle_max = adc_rawdata_buffer[max_index_safe+64];  //Werte für kontrolle kopieren
+	kontrolle_min = adc_rawdata_buffer[min_index_safe+64];
+
 	
 	if ( (kontrolle_max > (max_safe-100)) & (kontrolle_max < (max_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler
 	{
-		
+		max = max_safe;
 	}
 	else
 	{
-		Error_Flag = pdTRUE;
+		return pdTRUE;
 	}
 	
-	if ( (kontrolle_min > (min_safe-100)) & (kontrolle_min < (min_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler
+	if ( (kontrolle_min > (min_safe-100)) & (kontrolle_min < (min_safe+100)) )  //kontrolle minimalwert +- 100 von 4096 ca. 2.5% fehler
 	{
-		
+		min = min_safe; 
 	}
 	else
 	{
-		Error_Flag = pdTRUE;
+		return pdTRUE;
 	}
+	
 	return Error_Flag; // 0 = ok, 1 = fehler
 }
 

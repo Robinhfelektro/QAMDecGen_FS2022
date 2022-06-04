@@ -38,7 +38,7 @@ TickType_t xLastWakeTime;
 void send_to_data_buffer(uint16_t Data);
 //uint32_t get_slope(uint16_t index_0to319 );
 uint16_t idle_calculate_offset(uint16_t max, uint16_t min);
-bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t min_index);
+bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
 
 void vQuamDec(void* pvParameters)
 {
@@ -176,7 +176,7 @@ uint16_t idle_calculate_offset(uint16_t max, uint16_t min)
 	return dc_offset; 
 }
 
-bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t min_index)
+bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index)
 {
 	uint16_t y1 = 0; 
 	uint16_t y2 = 0; 
@@ -199,26 +199,18 @@ bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_
 		y2_index = i+startindex+1;
 		y1 = adc_rawdata_buffer[y1_index];
 		y2 = adc_rawdata_buffer[y2_index];
-		if ( y2 > y1 )
+		if ( (y2 > y1) & (y2 > max_safe)  )
 		{
 			max_safe = y2; 
 			max_index_safe = y2_index; 
 		}
 		else
 		{
-			if ( (y2 < y1)  )
+			if ( (y2 < y1) & (y2 < min_safe))
 			{
-				if ((y2 < min_safe))
-				{
-					min_safe = y2; 
-					min_index_safe = y2_index; 
-				}
-				
-			}
-			else
-			{
-				return pdTRUE;
-			}
+				min_safe = y2; 
+				min_index_safe = y2_index;
+ 			}
 		}
 	}
 
@@ -229,7 +221,8 @@ bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_
 	
 	if ( (kontrolle_max > (max_safe-100)) & (kontrolle_max < (max_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler
 	{
-		max = max_safe;
+		max = &max_safe;
+		max_index = &max_index_safe; 
 	}
 	else
 	{
@@ -238,7 +231,8 @@ bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_
 	
 	if ( (kontrolle_min > (min_safe-100)) & (kontrolle_min < (min_safe+100)) )  //kontrolle minimalwert +- 100 von 4096 ca. 2.5% fehler
 	{
-		min = min_safe; 
+		min = &min_safe; 
+		min_index = &min_index_safe; 
 	}
 	else
 	{

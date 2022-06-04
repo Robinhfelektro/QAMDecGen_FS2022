@@ -39,6 +39,7 @@ void send_to_data_buffer(uint16_t Data);
 //uint32_t get_slope(uint16_t index_0to319 );
 uint16_t idle_calculate_offset(uint16_t max, uint16_t min);
 bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
+bool idel_check_zerophase(uint16_t* max_index_check, uint16_t* dc_offset);
 
 void vQuamDec(void* pvParameters)
 {
@@ -139,6 +140,10 @@ void vQuamDecAnalysis(void* pvParameters)
 	uint16_t DC_Offset = 0; 
 	bool ErrorTest = pdFALSE; 
 	uint8_t ululu; 
+	
+	uint16_t testmin = 230;
+	uint16_t testmax = 2200; 
+	//uint16_t ms_count_test = 0; 
 	while (1)
 	{
 		
@@ -148,11 +153,17 @@ void vQuamDecAnalysis(void* pvParameters)
 			
 				Index = raw_data_buffer_index % 320;  //unnötig??
 				ErrorTest = idle_get_min_max(70, &idle_max_value, &idle_min_value, &idle_max_index, &idle_min_index);
-				if (ErrorTest == pdTRUE)
+				if (ErrorTest == pdTRUE)  //test für error check
 				{
 					ululu = 1; 
 				}
-				DC_Offset = idle_calculate_offset(idle_max_value, idle_min_value);
+				//DC_Offset = idle_calculate_offset(idle_max_value, idle_min_value);
+				DC_Offset = idle_calculate_offset(testmax, testmin);
+				if (idel_check_zerophase(&idle_max_index, &DC_Offset))  //wenn 0 phase ok == 1
+				{
+					//next mode --> wait for start bit
+				}
+				
 			
 			break; 
 			
@@ -162,10 +173,60 @@ void vQuamDecAnalysis(void* pvParameters)
 			default:
 			break; 
 		}
+		
+		//ms_count_test++;   //irgendwie geht das display nicht
+		//if(ms_count_test >= 200)//jede sekunde für test
+		//{
+			//vDisplayClear();
+			//ms_count_test = 0; 
+			//vDisplayWriteStringAtPos(3,0,"ResetReason: %d", DC_Offset);
+		//}
+		
 		vTaskDelayUntil( &xLastWakeTime, 5 / portTICK_RATE_MS);
 	}
 }
 
+bool idel_check_zerophase(uint16_t* max_index_check, uint16_t* dc_offset)
+{
+	
+	uint16_t zero_phae[10] = {};
+	uint16_t start_index_zero_phase = 0; 
+		
+		
+	if (max_index_check >= 0)
+	{
+		
+	}
+	if (max_index_check <= 0)
+	{
+	}
+	while( max_index_check > 0)
+	{
+		
+	}
+		
+	for (uint8_t i = 0; i < 10; i++)  //alle 0 punkte koorinaten in einem Array speichern? wieder über pointer?
+	{
+		
+	}
+	for (uint8_t i = 0; i < 64; i++)  //überprüung?
+	{
+		
+		adc_rawdata_buffer[1];
+	
+	}
+	
+	
+	
+	if (pdTRUE)
+	{
+		return pdTRUE;  //wenn berechnung ok 1
+	}
+	else
+	{
+		return pdFALSE;
+	}
+}
 
 uint16_t idle_calculate_offset(uint16_t max, uint16_t min)
 {

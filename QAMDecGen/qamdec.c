@@ -38,8 +38,9 @@ TickType_t xLastWakeTime;
 void send_to_data_buffer(uint16_t Data);
 //uint32_t get_slope(uint16_t index_0to319 );
 uint16_t idle_calculate_offset(uint16_t max, uint16_t min);
-bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
-bool idel_check_zerophase(uint16_t* max_index_check, uint16_t* dc_offset);
+bool idle_get_min_max(uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
+bool idel_check_zerophase(uint16_t* max_index_check, uint16_t* dc_offset, uint16_t* zerophase_index);
+void decipher_ringbuffer_1symbol(uint16_t* firtzerophase);
 
 void vQuamDec(void* pvParameters)
 {
@@ -68,16 +69,7 @@ void vQuamDec(void* pvParameters)
 	}
 }
 
-void send_to_data_buffer(uint16_t Data)
-{
-	adc_rawdata_buffer[raw_data_buffer_index % 320] = Data; 
-	raw_data_buffer_index++;  
-}
 
-uint16_t get_data_from_buffer(uint32_t index_adress)
-{
-	return adc_rawdata_buffer[index_adress % 320];
-}
 
 
 void vQuamDecAnalysis(void* pvParameters)
@@ -125,8 +117,9 @@ void vQuamDecAnalysis(void* pvParameters)
 										
 	
 		*/
-	#define STATE_IDLE 1
-	#define STATE_START 2
+	#define STATE_IDLE_INIT 1
+	#define STATE_WAIT_STARTBIT 2
+	#define STATE_START 3
 	xLastWakeTime = xTaskGetTickCount();
 	
 	
@@ -144,32 +137,51 @@ void vQuamDecAnalysis(void* pvParameters)
 	uint16_t testmin = 230;
 	uint16_t testmax = 2200; 
 	//uint16_t ms_count_test = 0; 
+	uint16_t first_zerophase = 0; 
+	
 	while (1)
 	{
 		
 		switch(State_Switch)
 		{
-			case STATE_IDLE:
+			case STATE_IDLE_INIT:
 			
 				Index = raw_data_buffer_index % 320;  //unnötig??
-				ErrorTest = idle_get_min_max(70, &idle_max_value, &idle_min_value, &idle_max_index, &idle_min_index);
+				ErrorTest = idle_get_min_max(&idle_max_value, &idle_min_value, &idle_max_index, &idle_min_index);  //immer ab array index 0
 				if (ErrorTest == pdTRUE)  //test für error check
 				{
 					ululu = 1; 
 				}
 				//DC_Offset = idle_calculate_offset(idle_max_value, idle_min_value);
 				DC_Offset = idle_calculate_offset(testmax, testmin);
-				if (idel_check_zerophase(&idle_max_index, &DC_Offset))  //wenn 0 phase ok == 1
+				if (idel_check_zerophase(&idle_max_index, &DC_Offset, &first_zerophase))  //wenn 0 phase ok == 1
 				{
 					//next mode --> wait for start bit
+					State_Switch = STATE_WAIT_STARTBIT; 
 				}
 				
+			break; 
 			
+			case STATE_WAIT_STARTBIT:
+			
+						void decipher_ringbuffer_1symbol(uint16_t* firtzerophase); //daten auswerten
+						
+						if (pdFALSE)  //falls fehler erkannt wieder in init/idle zustand
+						{
+							State_Switch = STATE_IDLE_INIT; 
+						}
 			break; 
 			
 			case STATE_START:
+						if (pdFALSE) //checksumme überprüft und stimmt --> bereit für weitere Daten
+						{
+							State_Switch = STATE_WAIT_STARTBIT; 
+						}
+						if (pdFALSE) //checksumme falsch oder fehler
+						{
+							State_Switch = STATE_IDLE_INIT; 
+						}
 			break;
-			
 			default:
 			break; 
 		}
@@ -186,41 +198,73 @@ void vQuamDecAnalysis(void* pvParameters)
 	}
 }
 
-bool idel_check_zerophase(uint16_t* max_index_check, uint16_t* dc_offset)
+void send_to_data_buffer(uint16_t Data)
+{
+	adc_rawdata_buffer[raw_data_buffer_index % 320] = Data;
+	raw_data_buffer_index++;
+}
+
+uint16_t get_data_from_buffer(uint32_t index_adress)
+{
+	return adc_rawdata_buffer[index_adress % 320];
+}
+
+
+void decipher_ringbuffer_1symbol(uint16_t* firtzerophase)
+{
+	/*
+		- 0 phase bekannt
+		- 32 daten ab 0 phasenindex überprüfen
+		- min max berechnen mit index
+		nicht invertiert: 
+			- max 0 bis 16 --> 0° phase
+			- min 16 bis 32 --> 0° phase
+		invertiert: 
+			- wenn max index nach 16 bis 32 --> phase invertiert
+			- wenn min index vor 0 bis 16 --> phase invertiert
+			
+		- Jetzt mithilfe von phase und min max value herausfinden welches  symbol
+		- Die Daten in einem Protokollbufferarry abspeichern --> vielleicht doppelt so gross wie eine übertragung
+	*/
+	
+	
+	for (uint8_t i = 0; i < 32; i++)
+	{
+		
+	}
+	
+}
+
+bool idel_check_zerophase(uint16_t* max_index_check, uint16_t* dc_offset, uint16_t* zerophase_index)
 {
 	
-	uint16_t zero_phae[10] = {};
-	uint16_t start_index_zero_phase = 0; 
+	uint16_t start_zerophase = 0; 
+	uint8_t zerophase_dedection_count = 0; 
 		
 		
-	if (max_index_check >= 0)
+	//first index in array --> -8 could be below zero
+	if( (max_index_check - 8) <= 7)  //overflow nächster value
 	{
-		
-	}
-	if (max_index_check <= 0)
+		start_zerophase = max_index_check + 32 - 8;
+	}	
+	else
 	{
+		start_zerophase = max_index_check - 8;
 	}
-	while( max_index_check > 0)
-	{
-		
-	}
-		
+	
 	for (uint8_t i = 0; i < 10; i++)  //alle 0 punkte koorinaten in einem Array speichern? wieder über pointer?
 	{
-		
-	}
-	for (uint8_t i = 0; i < 64; i++)  //überprüung?
-	{
-		
-		adc_rawdata_buffer[1];
-	
+		if (   (adc_rawdata_buffer[start_zerophase] > (dc_offset-100))  &  (adc_rawdata_buffer[start_zerophase] < (dc_offset+100)) ) //+- 100 von 4096 ca. 2.5% fehler
+		{
+			zerophase_dedection_count++; 
+		}
+		start_zerophase+= 32; 
 	}
 	
-	
-	
-	if (pdTRUE)
+	if (zerophase_dedection_count == 10) //daten valide 
 	{
 		return pdTRUE;  //wenn berechnung ok 1
+		zerophase_index = &start_zerophase; //startindex übergeben
 	}
 	else
 	{
@@ -237,7 +281,7 @@ uint16_t idle_calculate_offset(uint16_t max, uint16_t min)
 	return dc_offset; 
 }
 
-bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index)
+bool idle_get_min_max(uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index)
 {
 	uint16_t y1 = 0; 
 	uint16_t y2 = 0; 
@@ -256,8 +300,8 @@ bool idle_get_min_max(uint16_t startindex, uint16_t* max, uint16_t* min, uint16_
 	
 	for (uint8_t i = 0; i < 64; i++)
 	{
-		y1_index = i+startindex;
-		y2_index = i+startindex+1;
+		y1_index = i;
+		y2_index = i+1;
 		y1 = adc_rawdata_buffer[y1_index];
 		y2 = adc_rawdata_buffer[y2_index];
 		if ( (y2 > y1) & (y2 > max_safe)  )

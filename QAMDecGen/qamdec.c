@@ -128,16 +128,17 @@ void vQuamDecAnalysis(void* pvParameters)
 	uint16_t idle_min_value = 0; 
 	uint16_t idle_max_index = 0; 
 	uint16_t idle_min_index = 0; 
+	uint16_t first_zerophase = 0; 
+	uint16_t DC_Offset = 0; 
+	
+	
+	
 	
 	uint16_t Index = 0; 
-	uint16_t DC_Offset = 0; 
 	bool ErrorTest = pdFALSE; 
 	uint8_t ululu; 
 	
-	uint16_t testmin = 230;
-	uint16_t testmax = 2200; 
-	//uint16_t ms_count_test = 0; 
-	uint16_t first_zerophase = 0; 
+	vTaskDelay( 100 / portTICK_RATE_MS );  //10 ms warten
 	
 	while (1)
 	{
@@ -153,7 +154,7 @@ void vQuamDecAnalysis(void* pvParameters)
 					ululu = 1; 
 				}
 				//DC_Offset = idle_calculate_offset(idle_max_value, idle_min_value);
-				DC_Offset = idle_calculate_offset(testmax, testmin);
+				DC_Offset = idle_calculate_offset(idle_max_value, idle_min_value);
 				if (idel_check_zerophase(&idle_max_index, &DC_Offset, &first_zerophase))  //wenn 0 phase ok == 1
 				{
 					//next mode --> wait for start bit
@@ -164,7 +165,7 @@ void vQuamDecAnalysis(void* pvParameters)
 			
 			case STATE_WAIT_STARTBIT:
 			
-						void decipher_ringbuffer_1symbol(uint16_t* firtzerophase); //daten auswerten
+						decipher_ringbuffer_1symbol( &first_zerophase); //daten auswerten
 						
 						if (pdFALSE)  //falls fehler erkannt wieder in init/idle zustand
 						{
@@ -243,18 +244,33 @@ bool idel_check_zerophase(uint16_t* max_index_check, uint16_t* dc_offset, uint16
 		
 		
 	//first index in array --> -8 could be below zero
-	if( (max_index_check - 8) <= 7)  //overflow nächster value
+	//max value zwischen 0 und 64 index --> deshalb ab 40 -32 rechnen, damit beim kleinsten gestarted werden kann
+	
+	
+	if ( (max_index_check  >= 8) & (max_index_check  <= 40)  )  //erste phase in index 0-32 erkannt
 	{
-		start_zerophase = max_index_check + 32 - 8;
-	}	
+		start_zerophase = (*max_index_check) - 8;
+	}
 	else
 	{
-		start_zerophase = max_index_check - 8;
+		if ( (max_index_check  <= 7) )
+		{
+			start_zerophase = (*max_index_check) + 32 - 8; //überlauf verhindern
+		}
+		else
+		{
+			if ( max_index_check  >= 40 )
+			{
+				start_zerophase = (*max_index_check) - 32 - 8;  //-8 = -90°phase, -32 für ersten 0 druchgang
+			}
+		}
 	}
+	
+
 	
 	for (uint8_t i = 0; i < 10; i++)  //alle 0 punkte koorinaten in einem Array speichern? wieder über pointer?
 	{
-		if (   (adc_rawdata_buffer[start_zerophase] > (dc_offset-100))  &  (adc_rawdata_buffer[start_zerophase] < (dc_offset+100)) ) //+- 100 von 4096 ca. 2.5% fehler
+		if (   (adc_rawdata_buffer[start_zerophase] > (*dc_offset-100))  &  (adc_rawdata_buffer[start_zerophase] < (*dc_offset+100)) ) //+- 100 von 4096 ca. 2.5% fehler
 		{
 			zerophase_dedection_count++; 
 		}
@@ -264,7 +280,7 @@ bool idel_check_zerophase(uint16_t* max_index_check, uint16_t* dc_offset, uint16
 	if (zerophase_dedection_count == 10) //daten valide 
 	{
 		return pdTRUE;  //wenn berechnung ok 1
-		zerophase_index = &start_zerophase; //startindex übergeben
+		*zerophase_index = start_zerophase -320; //startindex übergeben, -320 um auf startwert zu kommen. 
 	}
 	else
 	{
@@ -295,6 +311,7 @@ bool idle_get_min_max(uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_
 	uint16_t kontrolle_max = 0; 
 	uint16_t kontrolle_min = 0; 
 	
+	uint8_t ululu_test; 
 	
 	bool Error_Flag = pdFALSE; 
 	
@@ -308,6 +325,7 @@ bool idle_get_min_max(uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_
 		{
 			max_safe = y2; 
 			max_index_safe = y2_index; 
+			ululu_test++; 
 		}
 		else
 		{
@@ -326,8 +344,8 @@ bool idle_get_min_max(uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_
 	
 	if ( (kontrolle_max > (max_safe-100)) & (kontrolle_max < (max_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler
 	{
-		max = &max_safe;
-		max_index = &max_index_safe; 
+		*max = max_safe;
+		*max_index = max_index_safe; 
 	}
 	else
 	{
@@ -336,8 +354,8 @@ bool idle_get_min_max(uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_
 	
 	if ( (kontrolle_min > (min_safe-100)) & (kontrolle_min < (min_safe+100)) )  //kontrolle minimalwert +- 100 von 4096 ca. 2.5% fehler
 	{
-		min = &min_safe; 
-		min_index = &min_index_safe; 
+		*min = min_safe; 
+		*min_index = min_index_safe; 
 	}
 	else
 	{

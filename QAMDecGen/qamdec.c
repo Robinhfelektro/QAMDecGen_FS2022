@@ -36,7 +36,6 @@ TickType_t xLastWakeTime;
 
 //Funktionen initialisieren
 void send_to_data_buffer(uint16_t Data);
-//uint32_t get_slope(uint16_t index_0to319 );
 uint16_t idle_calculate_offset(uint16_t max, uint16_t min);
 bool start_symbol_search(void);
 bool idel_check_all_zerophase(uint16_t max_index_check, uint16_t dc_offset, uint16_t* zerophase_index);
@@ -44,6 +43,7 @@ void decipher_ringbuffer_1symbol(uint16_t index , uint16_t first_zerophase, uint
 uint32_t get_320_index(uint32_t index);
 bool idle_get_min_max(uint32_t index, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
 uint8_t get_phase_maxindex( uint16_t index);
+bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint32_t* zero_index);
 
 void vQuamDec(void* pvParameters)
 {
@@ -77,49 +77,6 @@ void vQuamDec(void* pvParameters)
 
 void vQuamDecAnalysis(void* pvParameters)
 {
-	
-	
-	
-		/*Funktionen:	berechnen min max mit index Pointer min min max und inex übergeben siehe mail
-						(überprüfung ob wert valide ist)
-						mean berechnen mit min max 
-						
-						
-		Programm		32 adc werte mit funktion analysieren --> Logik damit Ringbuffer nicht überholt werden kann
-						mean, max berechnen mit funktion
-						0 PUnkt mithilfe von Index herausfinden
-							jeweils 90 oder 180° sind innteressante Punkte verschoben
-						
-						
-			
-		1. Initialisierung mit Synchronisationssygnal. (z.B. 10 mal testen)
-		2. Datean aus Ringbuffer auswerten und speichern (symbol erkenne, error index wait)
-				- offetkorrektur
-				- fehrlüberüfung --> zurück zu modus init
-					- Wait auf ringbuffer
-				- Daten speichern von Symbol
-				
-			2.1 Warten auf Startsymbol
-			2.2 Startsymbol gekommen
-			
-				
-		3. Daten aus Speicher auswerten mithilfe Protokoll ()
-						
-		1. DC Offset mit Synchrosignal herausfinden mit einem 64 bit bereich. max wert -8 = 0phasendurchgang
-			--> sanity check +32 oder - 32 index muss wieder maximalwert sein
-						-Funktion Sanity check
-						-Min Max Berechnen Funktion
-						- 
-		2. Daten Signale auswerten mithilfe der Berechnenten 0 Punkte aus dem 1 modus berechen. Datensymbole abspeichern
-		
-		
-						- check ringbuffer überholen oder vielleicht Errorcheck? Index check
-						
-		3. Datensymbole in Protokoll umrechnen 
-		
-										
-	
-		*/
 	#define STATE_IDLE_INIT 1
 	#define STATE_WAIT_STARTBIT 2
 	#define STATE_START 3
@@ -158,6 +115,7 @@ void vQuamDecAnalysis(void* pvParameters)
 					if (raw_data_buffer_index >=  decoder_index + 200) //Warten auf neue Werte
 					{
 						decoder_index = raw_data_buffer_index - 100; //nach raw data buffer
+						
 						if (idle_get_min_max(decoder_index, &idle_max_value, &idle_min_value, &idle_max_index, &idle_min_index))  //test für error check
 						{
 							sanity_check+= 1; 
@@ -247,6 +205,7 @@ void vQuamDecAnalysis(void* pvParameters)
 		vTaskDelayUntil( &xLastWakeTime, 5 / portTICK_RATE_MS);
 	}
 }
+
 
 bool start_symbol_search(void)
 {
@@ -354,6 +313,10 @@ uint8_t get_phase_maxindex( uint16_t index)
 	
 }
 
+
+
+
+
 bool idel_check_all_zerophase(uint16_t max_index_check, uint16_t dc_offset, uint16_t* zerophase_index)
 {
 	uint16_t start_zerophase = 0; 
@@ -413,6 +376,53 @@ uint16_t idle_calculate_offset(uint16_t max, uint16_t min)
 	
 	return dc_offset; 
 }
+
+
+bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint32_t* zero_index)  //calculate min, max and zerophase index
+{
+	uint32_t max_index_safe = 0; 
+	uint32_t min_index_safe = 0; 
+	uint16_t y1 = 0;
+	uint16_t y2 = 0;
+	uint16_t max_safe = 0;
+	uint16_t min_safe = 4096; //für erste if abfrage
+	uint16_t kontrolle_max = 0;
+	uint16_t kontrolle_min = 0;
+	bool Error_Flag = pdFALSE; 
+	for (uint8_t i = 0; i < 64; i++)
+	{
+		y1 = adc_rawdata_buffer[i + index];
+		y2 = adc_rawdata_buffer[i + index + 1];
+		if ( (y2 > y1) & (y2 > max_safe)  )
+		{
+			max_safe = y2;
+			max_index_safe = i + index + 1;
+		}
+		else
+		{
+			if ( (y2 < y1) & (y2 < min_safe))
+			{
+				min_safe = y2;
+				min_index_safe = i + index + 1;
+			}
+		}
+	}
+	if ( (adc_rawdata_buffer[get_320_index(max_index_safe+64)] > (max_safe-100)) & 
+		 (adc_rawdata_buffer[get_320_index(max_index_safe+64)] < (max_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler --> +64 für nächsten wert in tabelle
+	{
+		*max = max_safe;
+		return pdTRUE;
+	}
+	if ( (adc_rawdata_buffer[get_320_index(min_index_safe+64)] > (min_safe-100)) & 
+		 (adc_rawdata_buffer[get_320_index(min_index_safe+64)] < (min_safe+100)) )  //kontrolle minimalwert +- 100 von 4096 ca. 2.5% fehler
+	{
+		*min = min_safe;
+		return pdTRUE;
+	}
+	*zero_index = max_index_safe - 8; //-8 for zero phase
+	return Error_Flag; // 1 = ok, 0 = fehler
+}
+
 
 bool idle_get_min_max(uint32_t index, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index)
 {

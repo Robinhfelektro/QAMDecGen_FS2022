@@ -44,6 +44,7 @@ uint32_t get_320_index(uint32_t index);
 bool idle_get_min_max(uint32_t index, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
 uint8_t get_phase_maxindex( uint16_t index);
 bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint32_t* zero_index);
+bool idle_check_all_zerophase_new(uint32_t zero_index, uint16_t dc_offset, uint8_t check_strength); 
 
 void vQuamDec(void* pvParameters)
 {
@@ -86,10 +87,11 @@ void vQuamDecAnalysis(void* pvParameters)
 	uint8_t State_Switch = 1; 
 	uint16_t idle_max_value = 0; 
 	uint16_t idle_min_value = 0; 
-	uint16_t idle_max_index = 0; 
-	uint16_t idle_min_index = 0; 
+
+
 	uint16_t first_zerophase = 0; 
 	uint16_t DC_Offset = 0; 
+	
 	
 	
 	
@@ -97,11 +99,14 @@ void vQuamDecAnalysis(void* pvParameters)
 	uint16_t Index = 0; 
 	uint8_t sanity_check; 
 	uint32_t decoder_index = 0; 
+	uint32_t zero_phaseindex = 0; 
 	
 	uint32_t raw_buffer_index_ululu = 0; 
 	uint16_t timeout_time = 0;
 	
 	uint8_t Symbol_Data_array[120] = {};
+		
+	
 	
 	while (1)
 	{
@@ -116,7 +121,8 @@ void vQuamDecAnalysis(void* pvParameters)
 					{
 						decoder_index = raw_data_buffer_index - 100; //nach raw data buffer
 						
-						if (idle_get_min_max(decoder_index, &idle_max_value, &idle_min_value, &idle_max_index, &idle_min_index))  //test für error check
+						
+						if (idle_get_constant_values(decoder_index, &idle_max_value, &idle_min_value, &zero_phaseindex ))
 						{
 							sanity_check+= 1; 
 						}
@@ -131,10 +137,10 @@ void vQuamDecAnalysis(void* pvParameters)
 							decoder_index = raw_data_buffer_index - 100;
 							 
 							DC_Offset = idle_calculate_offset(idle_max_value, idle_min_value);
-							if (idel_check_all_zerophase(idle_max_index, DC_Offset, &first_zerophase))  //wenn 0 phase ok == 1
+							if (idle_check_all_zerophase_new(zero_phaseindex, DC_Offset, 5 ) )  //wenn 0 phase ok == 1
 							{
 								//next mode --> wait for start bit
-								State_Switch = STATE_WAIT_STARTBIT; 
+								//State_Switch = STATE_WAIT_STARTBIT; 
 							}
 							else
 							{
@@ -314,7 +320,27 @@ uint8_t get_phase_maxindex( uint16_t index)
 }
 
 
-
+bool idle_check_all_zerophase_new(uint32_t zero_index, uint16_t dc_offset, uint8_t check_strength)
+{
+	uint8_t zerophase_dedection_count = 0; 
+	
+	for(uint8_t i = 0; i < check_strength; i++) //up to 10
+	{
+		if ((adc_rawdata_buffer[get_320_index(zero_index + (i*32))] > (dc_offset-100))  &  
+		   ((adc_rawdata_buffer[get_320_index(zero_index + (i*32))] < (dc_offset+100)) )) //+- 100 von 4096 ca. 2.5% fehler
+		{
+			zerophase_dedection_count++;
+		}
+	}
+	if (zerophase_dedection_count == check_strength) //daten valide  0 bis 10 mal im array überprüfen
+	{
+		return pdTRUE;  //wenn berechnung ok 1
+	}
+	else
+	{
+		return pdFALSE;
+	}
+}
 
 
 bool idel_check_all_zerophase(uint16_t max_index_check, uint16_t dc_offset, uint16_t* zerophase_index)
@@ -391,8 +417,8 @@ bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint
 	bool Error_Flag = pdFALSE; 
 	for (uint8_t i = 0; i < 64; i++)
 	{
-		y1 = adc_rawdata_buffer[i + index];
-		y2 = adc_rawdata_buffer[i + index + 1];
+		y1 = adc_rawdata_buffer[get_320_index(i + index)];
+		y2 = adc_rawdata_buffer[get_320_index(i + index + 1)];
 		if ( (y2 > y1) & (y2 > max_safe)  )
 		{
 			max_safe = y2;
@@ -407,11 +433,14 @@ bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint
 			}
 		}
 	}
+	uint16_t test = adc_rawdata_buffer[get_320_index(max_index_safe+64)];
+	uint16_t test2 = adc_rawdata_buffer[get_320_index(min_index_safe+64)];
+	
 	if ( (adc_rawdata_buffer[get_320_index(max_index_safe+64)] > (max_safe-100)) & 
 		 (adc_rawdata_buffer[get_320_index(max_index_safe+64)] < (max_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler --> +64 für nächsten wert in tabelle
 	{
 		*max = max_safe;
-		return pdTRUE;
+		//return pdTRUE;
 	}
 	if ( (adc_rawdata_buffer[get_320_index(min_index_safe+64)] > (min_safe-100)) & 
 		 (adc_rawdata_buffer[get_320_index(min_index_safe+64)] < (min_safe+100)) )  //kontrolle minimalwert +- 100 von 4096 ca. 2.5% fehler

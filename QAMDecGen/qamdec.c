@@ -42,9 +42,9 @@ bool idel_check_all_zerophase(uint16_t max_index_check, uint16_t dc_offset, uint
 void decipher_ringbuffer_1symbol(uint16_t index , uint16_t first_zerophase, uint16_t idle_max_value); //daten auswerten
 uint32_t get_320_index(uint32_t index);
 bool idle_get_min_max(uint32_t index, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
-uint8_t get_phase_maxindex( uint16_t index);
+bool get_phase_maxindex( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return );
 bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint32_t* zero_index);
-bool idle_check_all_zerophase_new(uint32_t zero_index, uint16_t dc_offset, uint8_t check_strength); 
+bool idle_check_all_zerophase_new(uint32_t* zero_index, uint16_t dc_offset, uint8_t check_strength);
 
 void vQuamDec(void* pvParameters)
 {
@@ -105,12 +105,9 @@ void vQuamDecAnalysis(void* pvParameters)
 	uint16_t timeout_time = 0;
 	
 	uint8_t Symbol_Data_array[120] = {};
-		
-	
-	
+
 	while (1)
 	{
-		
 		switch(State_Switch)
 		{
 			case STATE_IDLE_INIT:
@@ -137,10 +134,10 @@ void vQuamDecAnalysis(void* pvParameters)
 							decoder_index = raw_data_buffer_index - 100;
 							 
 							DC_Offset = idle_calculate_offset(idle_max_value, idle_min_value);
-							if (idle_check_all_zerophase_new(zero_phaseindex, DC_Offset, 5 ) )  //wenn 0 phase ok == 1
+							if (idle_check_all_zerophase_new(&zero_phaseindex, DC_Offset, 5 ) )  //wenn 0 phase ok == 1
 							{
 								//next mode --> wait for start bit
-								//State_Switch = STATE_WAIT_STARTBIT; 
+								State_Switch = STATE_WAIT_STARTBIT; 
 							}
 							else
 							{
@@ -156,6 +153,18 @@ void vQuamDecAnalysis(void* pvParameters)
 			
 			case STATE_WAIT_STARTBIT:
 						
+						
+						decoder_index = zero_phaseindex;
+						while( (decoder_index + 40) < raw_data_buffer_index)
+						{
+							
+							
+							//deode_ringbuffer_symbol();
+							decoder_index+= 32; 
+						}
+						
+							
+				
 						//todo --> eher mit absolutem index rechne --> sonst muss einmal modulo zurückgerechnet werden bei setzen. 
 						//das if eher mit while ersetzen. --> sonst wird while ausgelöstA
 						
@@ -199,18 +208,67 @@ void vQuamDecAnalysis(void* pvParameters)
 			default:
 			break; 
 		}
-		
-		//ms_count_test++;   //irgendwie geht das display nicht
-		//if(ms_count_test >= 200)//jede sekunde für test
-		//{
-			//vDisplayClear();
-			//ms_count_test = 0; 
-			//vDisplayWriteStringAtPos(3,0,"ResetReason: %d", DC_Offset);
-		//}
-		
 		vTaskDelayUntil( &xLastWakeTime, 5 / portTICK_RATE_MS);
 	}
 }
+
+bool deode_ringbuffer_symbol_new(uint32_t zero_index, uint16_t dc_offset)
+{
+	//get_phase_maxindex();  //irgendwie alles in dieser funktion 
+	// write to array?? oder alles in einer funktion??
+	
+	
+}
+
+bool get_phase_maxindex( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return )
+{
+	
+	if ( get_320_index(zero_index) )  // 0 durchgang überprüfen +- 2.5 % abbweichung
+	{
+		return pdFALSE;
+	}
+	uint16_t half_ampl_pos = (max_value - dc_offset) / 2 ; 
+	uint16_t half_ampl_neg = dc_offset - half_ampl_pos;
+	
+	//0 phase, max ampli		1	
+	//180 phase, max ampli		2	
+	//0 phase, 1/2 ampli		3
+	//180 phase, 1/2 ampli		4
+	*symbol_return = 0; 
+	
+	//todo --> doppel ifs mit & um mehrfach zu verhindern
+	if (get_320_index(zero_index + 8) > (max_value - 50) )  //0 phase, max ampli 1
+	{
+		if (*symbol_return == 0)
+		{
+			*symbol_return = 1;
+		}
+	}
+	if (get_320_index(zero_index + 8) > (half_ampl_pos - 50) ) //0 phase, half ampli
+	{
+		if (*symbol_return == 0)
+		{
+			*symbol_return = 3;
+		}
+	}
+	if (get_320_index(zero_index + 8) > (min_value + 50) ) //180 ° phase, max ampli
+	{
+		if (*symbol_return == 0)
+		{
+			*symbol_return = 2;
+		}
+	}
+	if (get_320_index(zero_index + 8) > (half_ampl_neg + 50) ) //180 ° phase, max ampli
+	{
+		if (*symbol_return == 0)
+		{
+			*symbol_return = 4;
+		}
+	}
+	return pdTRUE;
+	
+}
+
 
 
 bool start_symbol_search(void)
@@ -278,7 +336,7 @@ void decipher_ringbuffer_1symbol(uint16_t index , uint16_t first_zerophase, uint
 			}
 		}
 	}
-	uint8_t get_phase_maxindex( uint16_t index); 
+	//uint8_t get_phase_maxindex( uint16_t index); 
 	
 	for (uint8_t i = 0; i < 32; i++)
 	{
@@ -291,49 +349,24 @@ uint8_t get_symbol(uint16_t max_value , uint16_t max_value_2 , uint8_t phase)
 	
 }
 
-uint8_t get_phase_maxindex( uint16_t index)
-{
-	/*
-		- 0 phase bekannt
-		- 32 daten ab 0 phasenindex überprüfen  , 32 ab 0°
-		- min max berechnen mit index
-		nicht invertiert: 
-			- max 0 bis 16 --> 0° phase
-			- min 16 bis 32 --> 0° phase
-		invertiert: 
-			- wenn max index nach 16 bis 32 --> phase invertiert
-			- wenn min index vor 0 bis 16 --> phase invertiert
-			
-		- Jetzt mithilfe von phase und min max value herausfinden welches  symbol
-		- Die Daten in einem Protokollbufferarry abspeichern --> vielleicht doppelt so gross wie eine übertragung
-	*/
-	
-	if (index > 16)
-	{
-		return 0; 
-	}
-	else
-	{
-		return 160; 
-	}
-	
-}
 
 
-bool idle_check_all_zerophase_new(uint32_t zero_index, uint16_t dc_offset, uint8_t check_strength)
+
+bool idle_check_all_zerophase_new(uint32_t* zero_index, uint16_t dc_offset, uint8_t check_strength)
 {
 	uint8_t zerophase_dedection_count = 0; 
 	
 	for(uint8_t i = 0; i < check_strength; i++) //up to 10
 	{
-		if ((adc_rawdata_buffer[get_320_index(zero_index + (i*32))] > (dc_offset-100))  &  
-		   ((adc_rawdata_buffer[get_320_index(zero_index + (i*32))] < (dc_offset+100)) )) //+- 100 von 4096 ca. 2.5% fehler
+		if ((adc_rawdata_buffer[get_320_index(*zero_index + (i*32))] > (dc_offset-100))  &  
+		   ((adc_rawdata_buffer[get_320_index(*zero_index + (i*32))] < (dc_offset+100)) )) //+- 100 von 4096 ca. 2.5% fehler
 		{
 			zerophase_dedection_count++;
 		}
 	}
 	if (zerophase_dedection_count == check_strength) //daten valide  0 bis 10 mal im array überprüfen
 	{
+		*zero_index = *zero_index + (check_strength*32);  //update zero_index to new value 
 		return pdTRUE;  //wenn berechnung ok 1
 	}
 	else
@@ -397,9 +430,7 @@ bool idel_check_all_zerophase(uint16_t max_index_check, uint16_t dc_offset, uint
 uint16_t idle_calculate_offset(uint16_t max, uint16_t min)
 {
 	uint16_t dc_offset = 0; 
-	
 	dc_offset = ((max - min) / 2) + min; 
-	
 	return dc_offset; 
 }
 
@@ -414,7 +445,6 @@ bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint
 	uint16_t min_safe = 4096; //für erste if abfrage
 	uint16_t kontrolle_max = 0;
 	uint16_t kontrolle_min = 0;
-	bool Error_Flag = pdFALSE; 
 	for (uint8_t i = 0; i < 64; i++)
 	{
 		y1 = adc_rawdata_buffer[get_320_index(i + index)];
@@ -433,23 +463,26 @@ bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint
 			}
 		}
 	}
-	uint16_t test = adc_rawdata_buffer[get_320_index(max_index_safe+64)];
-	uint16_t test2 = adc_rawdata_buffer[get_320_index(min_index_safe+64)];
-	
 	if ( (adc_rawdata_buffer[get_320_index(max_index_safe+64)] > (max_safe-100)) & 
 		 (adc_rawdata_buffer[get_320_index(max_index_safe+64)] < (max_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler --> +64 für nächsten wert in tabelle
 	{
 		*max = max_safe;
-		//return pdTRUE;
+	}
+	else
+	{
+		return pdFALSE; 
 	}
 	if ( (adc_rawdata_buffer[get_320_index(min_index_safe+64)] > (min_safe-100)) & 
 		 (adc_rawdata_buffer[get_320_index(min_index_safe+64)] < (min_safe+100)) )  //kontrolle minimalwert +- 100 von 4096 ca. 2.5% fehler
 	{
 		*min = min_safe;
-		return pdTRUE;
+	}
+	else
+	{
+		return pdFALSE; 
 	}
 	*zero_index = max_index_safe - 8; //-8 for zero phase
-	return Error_Flag; // 1 = ok, 0 = fehler
+	return pdTRUE; // 1 = ok, 0 = fehler
 }
 
 

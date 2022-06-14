@@ -26,6 +26,7 @@
 #include "qamdec.h"
 
 QueueHandle_t decoderQueue;
+QueueHandle_t receive_symbol_queue;
 
 
 uint16_t adc_rawdata_buffer[320] = {};  //32 * 16bit var * 10 ms
@@ -45,6 +46,130 @@ bool idle_get_min_max(uint32_t index, uint16_t* max, uint16_t* min, uint16_t* ma
 bool get_phase_maxindex( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return );
 bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint32_t* zero_index);
 bool idle_check_all_zerophase_new(uint32_t* zero_index, uint16_t dc_offset, uint8_t check_strength);
+
+void process_symbol_array(uint8_t* symbol_array, uint8_t protocol_length);
+
+
+
+#define PRS_IDLE				0
+#define PRS_1SBIT_CHECKED		1  
+#define PRS_2SBIT_CHECKED		2
+#define PRS_RECEIVED_DATA		3
+#define PRS_CHECK_SUM			4
+
+
+void vProtocolDecoder(void* pvParameters)
+{
+	receive_symbol_queue = xQueueCreate( 50, sizeof(uint8_t) );  //datenarray
+	uint8_t receive_symbol = 0; 
+	uint8_t lokal_receive_array[200]; //200 symbol --> 400 bit --> 50 byte
+	uint8_t receive_index = 0; 
+	uint8_t protocol_receive_state =  PRS_IDLE;
+	uint8_t protocol_length = 0; 
+	uint8_t protocol_id = 0; 
+	uint8_t checksum_received = 0;
+	uint8_t checksum_calculated = 0; 
+	
+	for(;;)
+	{
+		if(xQueueReceive(receive_symbol_queue, &receive_symbol , portMAX_DELAY) == pdTRUE) 
+		{
+			switch(protocol_receive_state)
+			{
+				case PRS_IDLE:
+					if(receive_symbol == 1)  //1. Start Symbol
+					{
+						protocol_receive_state = PRS_1SBIT_CHECKED; 
+						lokal_receive_array[receive_index] = receive_symbol; 
+						receive_index++; 
+					}
+				break; 
+				
+				case PRS_1SBIT_CHECKED:      
+					if(receive_symbol == 2)  //2. Start Symbol
+					{
+						protocol_receive_state = PRS_2SBIT_CHECKED;
+						lokal_receive_array[receive_index] = receive_symbol;
+						receive_index++;
+					}
+					else
+					{
+						protocol_receive_state = PRS_IDLE; 
+						receive_index = 0;
+					}
+				break;
+				case PRS_2SBIT_CHECKED:
+					
+					//symbol 0,1 start
+					//2 und 3 ID
+					//4,5,6,7 length
+					lokal_receive_array[receive_index] = receive_symbol;
+					receive_index++;
+					
+					if(receive_index == 8)
+					{
+						protocol_length =  lokal_receive_array[4] << 0;
+						protocol_length += lokal_receive_array[5] << 2;
+						protocol_length += lokal_receive_array[6] << 4;
+						protocol_length += lokal_receive_array[7] << 6;
+						protocol_receive_state = PRS_RECEIVED_DATA; 
+					}
+				break; 
+				case PRS_RECEIVED_DATA:
+				
+					lokal_receive_array[receive_index] = receive_symbol;
+					receive_index++;
+					if (receive_index == ((protocol_length*4) + 8))
+					{
+						protocol_receive_state = PRS_CHECK_SUM; 
+					}
+				break;
+				case PRS_CHECK_SUM:
+				
+					lokal_receive_array[receive_index] = receive_symbol;
+					receive_index++;
+					if (receive_index == (12 + (protocol_length * 4)) )    //	fix value = 12 symbol --> protokoll length,  10 * 4 symbol  --> berechnet											
+					{
+						checksum_received =  lokal_receive_array[8 + 0 +(protocol_length * 4) ] << 0;    
+						checksum_received += lokal_receive_array[8 + 1 +(protocol_length * 4) ] << 2;
+						checksum_received += lokal_receive_array[8 + 2 +(protocol_length * 4) ] << 4;
+						checksum_received += lokal_receive_array[8 + 3 +(protocol_length * 4) ] << 6;
+					
+						//Checksumme
+						for(int i = 0; i<8+(protocol_length*4); i++) 
+						{
+							checksum_calculated += lokal_receive_array[i];
+						}
+						if (checksum_calculated == checksum_received )
+						{
+							process_symbol_array(&lokal_receive_array[0], protocol_length);
+						}
+						protocol_receive_state = PRS_IDLE;
+						receive_index = 0; 
+					}
+				break;
+				
+			}
+		}
+		vTaskDelay( 20 / portTICK_RATE_MS );
+	}
+}
+
+void process_symbol_array(uint8_t* symbol_array, uint8_t protocol_length)
+{
+	char received_string[24];
+	for(uint8_t i = 0; i < protocol_length; i++)
+	{
+		received_string[i] =   symbol_array[8 + 0 +(i * 4) ] << 0;
+		received_string[i] +=  symbol_array[8 + 1 +(i * 4) ] << 2;
+		received_string[i] +=  symbol_array[8 + 2 +(i * 4) ] << 4;
+		received_string[i] +=  symbol_array[8 + 3 +(i * 4) ] << 6;
+	}
+	vDisplayClear();
+	vDisplayWriteStringAtPos(0,0,"received string");
+	vDisplayWriteStringAtPos(1,0,"%s", received_string[0]);
+	//vDisplayWriteStringAtPos(1,0,"ResetReason: %s", received_string[0]);  //id übergeben
+}
 
 void vQuamDec(void* pvParameters)
 {
@@ -138,6 +263,7 @@ void vQuamDecAnalysis(void* pvParameters)
 							{
 								//next mode --> wait for start bit
 								State_Switch = STATE_WAIT_STARTBIT; 
+								decoder_index = zero_phaseindex;
 							}
 							else
 							{
@@ -154,44 +280,46 @@ void vQuamDecAnalysis(void* pvParameters)
 			case STATE_WAIT_STARTBIT:
 						
 						
-						decoder_index = zero_phaseindex;
+						
 						while( (decoder_index + 40) < raw_data_buffer_index)
 						{
 							
 							
 							//deode_ringbuffer_symbol();
 							decoder_index+= 32; 
+							//index korrektur funktion();
 						}
+						
 						
 							
 				
 						//todo --> eher mit absolutem index rechne --> sonst muss einmal modulo zurückgerechnet werden bei setzen. 
 						//das if eher mit while ersetzen. --> sonst wird while ausgelöstA
 						
-						if (  (decoder_index + 40)   <  raw_data_buffer_index ) //so gelöst
-						{
-							
-							decipher_ringbuffer_1symbol(decoder_index , &first_zerophase, idle_max_value); //daten auswerten
-							decoder_index = raw_data_buffer_index + 32; 
-							
-							
-							if (start_symbol_search() == 1)
-							{
-								State_Switch = STATE_START; //
-							}
-							
-							
-						
-							if (pdFALSE)  //falls fehler erkannt wieder in init/idle zustand
-							{
-								State_Switch = STATE_IDLE_INIT; 
-							}
-						}
-						else
-						{
-							
-						}
-						
+						//if (  (decoder_index + 40)   <  raw_data_buffer_index ) //so gelöst
+						//{
+							//
+							//decipher_ringbuffer_1symbol(decoder_index , &first_zerophase, idle_max_value); //daten auswerten
+							//decoder_index = raw_data_buffer_index + 32; 
+							//
+							//
+							//if (start_symbol_search() == 1)
+							//{
+								//State_Switch = STATE_START; //
+							//}
+							//
+							//
+						//
+							//if (pdFALSE)  //falls fehler erkannt wieder in init/idle zustand
+							//{
+								//State_Switch = STATE_IDLE_INIT; 
+							//}
+						//}
+						//else
+						//{
+							//
+						//}
+						//
 						
 			break; 
 			
@@ -217,29 +345,44 @@ bool deode_ringbuffer_symbol_new(uint32_t zero_index, uint16_t dc_offset)
 	//get_phase_maxindex();  //irgendwie alles in dieser funktion 
 	// write to array?? oder alles in einer funktion??
 	
+	//protokoll_decoder
+	
+	uint8_t decoded_symbol = 0; 
+	//get_phase_maxindex()         //in dieser funktion syymbole generieren --> neuer namen noch
+	xQueueSend(receive_symbol_queue, &decoded_symbol, 0);
+	
+}
+
+bool protokoll_decoder(uint8_t* array)
+{
 	
 }
 
 bool get_phase_maxindex( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return )
 {
 	
-	if ( get_320_index(zero_index) )  // 0 durchgang überprüfen +- 2.5 % abbweichung
+	if ( get_320_index(zero_index) )  // 0 durchgang überprüfen +- 25 % abbweichung +-100
 	{
+		//vergleich mit dc offset
 		return pdFALSE;
 	}
-	uint16_t half_ampl_pos = (max_value - dc_offset) / 2 ; 
-	uint16_t half_ampl_neg = dc_offset - half_ampl_pos;
 	
-	//0 phase, max ampli		1	
+	
+	uint16_t half_ampl_pos = ((max_value - dc_offset) >> 1) + dc_offset;  //durch 2
+	uint16_t half_ampl_neg = half_ampl_pos - dc_offset;
+	
+	//0 phase, max ampli		0
 	//180 phase, max ampli		2	
-	//0 phase, 1/2 ampli		3
-	//180 phase, 1/2 ampli		4
+	//0 phase, 1/2 ampli		1
+	//180 phase, 1/2 ampli		3
 	*symbol_return = 0; 
+	
+	//check_value_inrange verwenden
 	
 	//todo --> doppel ifs mit & um mehrfach zu verhindern
 	if (get_320_index(zero_index + 8) > (max_value - 50) )  //0 phase, max ampli 1
 	{
-		if (*symbol_return == 0)
+		if (*symbol_return == 0) //unnötig
 		{
 			*symbol_return = 1;
 		}
@@ -271,10 +414,16 @@ bool get_phase_maxindex( uint32_t zero_index, uint16_t max_value, uint16_t min_v
 
 
 
-bool start_symbol_search(void)
+bool check_value_inrange(uint16_t value, uint16_t reference, uint16_t range)
 {
+	//ture/false 16 vergleich(wert ,  vergleichswert z.B. dc offset, range+-)
+	//if ((adc_rawdata_buffer[get_320_index(*zero_index + (i*32))] > (dc_offset-100))  &
+	//((adc_rawdata_buffer[get_320_index(*zero_index + (i*32))] < (dc_offset+100)) )) //+- 100 von 4096 ca. 2.5% fehler
 	
 }
+
+
+
 uint32_t get_320_index(uint32_t index)
 {
 	return index % 320;
@@ -369,10 +518,7 @@ bool idle_check_all_zerophase_new(uint32_t* zero_index, uint16_t dc_offset, uint
 		*zero_index = *zero_index + (check_strength*32);  //update zero_index to new value 
 		return pdTRUE;  //wenn berechnung ok 1
 	}
-	else
-	{
-		return pdFALSE;
-	}
+	return pdFALSE;
 }
 
 

@@ -11,6 +11,7 @@
 
 void vQuamDec(void* pvParameters);
 void vQuamDecAnalysis(void* pvParameters);
+void vProtocolDecoder(void* pvParameters);
 
 
 

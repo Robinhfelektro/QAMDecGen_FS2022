@@ -45,8 +45,6 @@ const int16_t sinLookup50[NR_OF_SAMPLES*2] = {0x0,0xC8,0x187,0x238,0x2D3,0x353,0
 #define SENDBUFFER_SIZE 20
 uint8_t sendbuffer[SENDBUFFER_SIZE] = {0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3,0,3};
 
-
-
 void vQuamGen(void *pvParameters) {
 	while(evDMAState == NULL) {
 		vTaskDelay(3/portTICK_RATE_MS);

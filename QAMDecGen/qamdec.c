@@ -43,11 +43,13 @@ bool idel_check_all_zerophase(uint16_t max_index_check, uint16_t dc_offset, uint
 void decipher_ringbuffer_1symbol(uint16_t index , uint16_t first_zerophase, uint16_t idle_max_value); //daten auswerten
 uint32_t get_320_index(uint32_t index);
 bool idle_get_min_max(uint32_t index, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
-bool get_phase_maxindex( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return );
 bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint32_t* zero_index);
 bool idle_check_all_zerophase_new(uint32_t* zero_index, uint16_t dc_offset, uint8_t check_strength);
 
 void process_symbol_array(uint8_t* symbol_array, uint8_t protocol_length);
+bool check_value_inrange(uint16_t value, uint16_t reference, uint16_t range);
+bool decode_ringbuffer_symbol_new(uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset);
+bool decode_symbol_return( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return );
 
 
 
@@ -200,37 +202,23 @@ void vQuamDec(void* pvParameters)
 
 
 
-
+#define STATE_IDLE_INIT 1
+#define STATE_WAIT_STARTBIT 2
 void vQuamDecAnalysis(void* pvParameters)
 {
-	#define STATE_IDLE_INIT 1
-	#define STATE_WAIT_STARTBIT 2
-	#define STATE_START 3
+	
 	xLastWakeTime = xTaskGetTickCount();
-	
-	
 	uint8_t State_Switch = 1; 
+	
 	uint16_t idle_max_value = 0; 
 	uint16_t idle_min_value = 0; 
-
-
 	uint16_t first_zerophase = 0; 
 	uint16_t DC_Offset = 0; 
 	
-	
-	
-	
-	bool ErrorTest = pdFALSE; 
-	uint16_t Index = 0; 
 	uint8_t sanity_check; 
 	uint32_t decoder_index = 0; 
 	uint32_t zero_phaseindex = 0; 
 	
-	uint32_t raw_buffer_index_ululu = 0; 
-	uint16_t timeout_time = 0;
-	
-	uint8_t Symbol_Data_array[120] = {};
-
 	while (1)
 	{
 		switch(State_Switch)
@@ -277,149 +265,91 @@ void vQuamDecAnalysis(void* pvParameters)
 				
 			break; 
 			
-			case STATE_WAIT_STARTBIT:
-						
-						
+			case STATE_WAIT_STARTBIT:	
 						
 						while( (decoder_index + 40) < raw_data_buffer_index)
 						{
-							
-							
-							//deode_ringbuffer_symbol();
+							if (decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset) == pdFALSE)
+							{	
+								State_Switch = STATE_IDLE_INIT;  //fehler erkannt
+							}
+							//decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset);
 							decoder_index+= 32; 
 							//index korrektur funktion();
 						}
-						
-						
-							
-				
-						//todo --> eher mit absolutem index rechne --> sonst muss einmal modulo zurückgerechnet werden bei setzen. 
-						//das if eher mit while ersetzen. --> sonst wird while ausgelöstA
-						
-						//if (  (decoder_index + 40)   <  raw_data_buffer_index ) //so gelöst
-						//{
-							//
-							//decipher_ringbuffer_1symbol(decoder_index , &first_zerophase, idle_max_value); //daten auswerten
-							//decoder_index = raw_data_buffer_index + 32; 
-							//
-							//
-							//if (start_symbol_search() == 1)
-							//{
-								//State_Switch = STATE_START; //
-							//}
-							//
-							//
-						//
-							//if (pdFALSE)  //falls fehler erkannt wieder in init/idle zustand
-							//{
-								//State_Switch = STATE_IDLE_INIT; 
-							//}
-						//}
-						//else
-						//{
-							//
-						//}
-						//
-						
 			break; 
-			
-			case STATE_START:
-						if (pdFALSE) //checksumme überprüft und stimmt --> bereit für weitere Daten
-						{
-							State_Switch = STATE_WAIT_STARTBIT; 
-						}
-						if (pdFALSE) //checksumme falsch oder fehler
-						{
-							State_Switch = STATE_IDLE_INIT; 
-						}
-			break;
 			default:
 			break; 
 		}
-		vTaskDelayUntil( &xLastWakeTime, 5 / portTICK_RATE_MS);
+		vTaskDelayUntil( &xLastWakeTime, 3 / portTICK_RATE_MS);
 	}
 }
 
-bool deode_ringbuffer_symbol_new(uint32_t zero_index, uint16_t dc_offset)
+bool decode_ringbuffer_symbol_new(uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset)
 {
-	//get_phase_maxindex();  //irgendwie alles in dieser funktion 
-	// write to array?? oder alles in einer funktion??
-	
-	//protokoll_decoder
-	
 	uint8_t decoded_symbol = 0; 
-	//get_phase_maxindex()         //in dieser funktion syymbole generieren --> neuer namen noch
-	xQueueSend(receive_symbol_queue, &decoded_symbol, 0);
-	
-}
-
-bool protokoll_decoder(uint8_t* array)
-{
-	
-}
-
-bool get_phase_maxindex( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return )
-{
-	
-	if ( get_320_index(zero_index) )  // 0 durchgang überprüfen +- 25 % abbweichung +-100
+	if (decode_symbol_return(zero_index, max_value, min_value, dc_offset, &decoded_symbol))
 	{
-		//vergleich mit dc offset
+		//get_phase_maxindex()         //in dieser funktion syymbole generieren --> neuer namen noch
+		xQueueSend(receive_symbol_queue, &decoded_symbol, 0);
+		return pdTRUE; 
+	}	
+	return pdFALSE; 
+}
+
+
+bool decode_symbol_return( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return )
+{
+	uint8_t check = 0;  
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index)], dc_offset, 100 ) == 0) // 0 durchgang überprüfen +- 25 % abbweichung +-100
+	{
 		return pdFALSE;
 	}
-	
-	
-	uint16_t half_ampl_pos = ((max_value - dc_offset) >> 1) + dc_offset;  //durch 2
-	uint16_t half_ampl_neg = half_ampl_pos - dc_offset;
-	
-	//0 phase, max ampli		0
-	//180 phase, max ampli		2	
-	//0 phase, 1/2 ampli		1
-	//180 phase, 1/2 ampli		3
-	*symbol_return = 0; 
-	
-	//check_value_inrange verwenden
-	
-	//todo --> doppel ifs mit & um mehrfach zu verhindern
-	if (get_320_index(zero_index + 8) > (max_value - 50) )  //0 phase, max ampli 1
+	/*
+	0 = 100%, 0°         00
+	1 = 100%, 180°       01
+	2 = 50%, 0°			 10
+	3 = 50%, 180°		 11
+	*/
+	uint16_t debug = adc_rawdata_buffer[get_320_index(zero_index)]; 
+	uint16_t debug1 = adc_rawdata_buffer[get_320_index(zero_index+8)]; 
+	uint16_t half_ampl_pos = ((max_value - dc_offset) >> 1) + dc_offset;  //durch 2, schneller und weniger leistung
+	uint16_t half_ampl_neg = dc_offset - ((max_value - dc_offset) >> 1);
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], max_value, 100 )) // 0 
 	{
-		if (*symbol_return == 0) //unnötig
-		{
-			*symbol_return = 1;
-		}
+		*symbol_return = 0;
+		check++; 
 	}
-	if (get_320_index(zero_index + 8) > (half_ampl_pos - 50) ) //0 phase, half ampli
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], min_value, 100 )) // 0
 	{
-		if (*symbol_return == 0)
-		{
-			*symbol_return = 3;
-		}
+		*symbol_return = 1;
+		check++; 
 	}
-	if (get_320_index(zero_index + 8) > (min_value + 50) ) //180 ° phase, max ampli
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], half_ampl_pos, 100)) // 0
 	{
-		if (*symbol_return == 0)
-		{
-			*symbol_return = 2;
-		}
+		*symbol_return = 2;
+		check++; 
 	}
-	if (get_320_index(zero_index + 8) > (half_ampl_neg + 50) ) //180 ° phase, max ampli
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], half_ampl_neg, 100)) // 0
 	{
-		if (*symbol_return == 0)
-		{
-			*symbol_return = 4;
-		}
+		*symbol_return = 3;
+		check++; 
+	}
+	if (check == 0)
+	{
+		return pdFALSE;
 	}
 	return pdTRUE;
-	
 }
-
 
 
 bool check_value_inrange(uint16_t value, uint16_t reference, uint16_t range)
 {
-	//ture/false 16 vergleich(wert ,  vergleichswert z.B. dc offset, range+-)
-	//if ((adc_rawdata_buffer[get_320_index(*zero_index + (i*32))] > (dc_offset-100))  &
-	//((adc_rawdata_buffer[get_320_index(*zero_index + (i*32))] < (dc_offset+100)) )) //+- 100 von 4096 ca. 2.5% fehler
-	
+	if ( (value > (reference - range)) & (value < (reference + range)) ) 
+	{
+		return pdTRUE;
+	}
+	return pdFALSE;
 }
 
 

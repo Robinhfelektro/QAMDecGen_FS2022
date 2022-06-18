@@ -55,8 +55,8 @@ int main(void)
 	initADCTimer();
 	initDecDMA();
 	
-	xTaskCreate(vQuamGen, NULL, configMINIMAL_STACK_SIZE+500, NULL, 2, NULL);
-	xTaskCreate(vQuamDec, NULL, configMINIMAL_STACK_SIZE+100, NULL, 1, NULL);
+	xTaskCreate(vQuamGen, NULL, configMINIMAL_STACK_SIZE+500, NULL, 3, NULL);
+	xTaskCreate(vQuamDec, NULL, configMINIMAL_STACK_SIZE+100, NULL, 2, NULL);
 	xTaskCreate(vQuamDecAnalysis, NULL, configMINIMAL_STACK_SIZE+500, NULL, 1, NULL);
 	xTaskCreate(vProtocolDecoder, NULL, configMINIMAL_STACK_SIZE+500, NULL, 1, NULL);
 

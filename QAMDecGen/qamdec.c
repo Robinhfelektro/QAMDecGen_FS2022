@@ -40,7 +40,6 @@ void send_to_data_buffer(uint16_t Data);
 uint16_t idle_calculate_offset(uint16_t max, uint16_t min);
 bool start_symbol_search(void);
 bool idel_check_all_zerophase(uint16_t max_index_check, uint16_t dc_offset, uint16_t* zerophase_index);
-void decipher_ringbuffer_1symbol(uint16_t index , uint16_t first_zerophase, uint16_t idle_max_value); //daten auswerten
 uint32_t get_320_index(uint32_t index);
 bool idle_get_min_max(uint32_t index, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
 bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint32_t* zero_index);
@@ -218,6 +217,7 @@ void vQuamDecAnalysis(void* pvParameters)
 	uint8_t sanity_check; 
 	uint32_t decoder_index = 0; 
 	uint32_t zero_phaseindex = 0; 
+	uint8_t while_break = 0; 
 	
 	while (1)
 	{
@@ -269,29 +269,78 @@ void vQuamDecAnalysis(void* pvParameters)
 						
 						while( (decoder_index + 40) < raw_data_buffer_index)
 						{
+							
+							
 							if (decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset) == pdFALSE)
-							{	
+							{
 								State_Switch = STATE_IDLE_INIT;  //fehler erkannt
 							}
 							//decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset);
-							decoder_index+= 32; 
+							decoder_index+= 32;
 							//index korrektur funktion();
+							
+							
+							
+							//if ( (decoder_index + 96) < raw_data_buffer_index)  //mehr als 3ms hinterher
+							//{
+								//for (uint8_t i = 0; i < 5; i++)
+								//{
+									//if (decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset) == pdFALSE)
+									//{
+										//State_Switch = STATE_IDLE_INIT;  //fehler erkannt
+									//}
+									////decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset);
+									//decoder_index+= 32;
+								//}
+								//while_break = 1; 
+								//break; //geht das?
+							//}
+							//else
+							//{
+								//if (decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset) == pdFALSE)
+								//{
+									//State_Switch = STATE_IDLE_INIT;  //fehler erkannt
+								//}
+								////decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset);
+								//decoder_index+= 32;
+								////index korrektur funktion();
+								//
+								//while_break = 0; 
+							//}
+							//if (while_break)
+							//{
+								//break;
+							//}
 						}
 			break; 
 			default:
 			break; 
 		}
-		vTaskDelayUntil( &xLastWakeTime, 3 / portTICK_RATE_MS);
+		vTaskDelayUntil( &xLastWakeTime, 5 / portTICK_RATE_MS);
 	}
 }
 
+uint8_t global_testarray[100];
 bool decode_ringbuffer_symbol_new(uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset)
 {
+	
+	static uint8_t i = 0; 
+	
+	
 	uint8_t decoded_symbol = 0; 
 	if (decode_symbol_return(zero_index, max_value, min_value, dc_offset, &decoded_symbol))
 	{
 		//get_phase_maxindex()         //in dieser funktion syymbole generieren --> neuer namen noch
 		xQueueSend(receive_symbol_queue, &decoded_symbol, 0);
+		
+		global_testarray[i] = decoded_symbol;  
+		
+		i++; 
+		if (i >= 100)
+		{
+			i = 0; 
+		}
+		
 		return pdTRUE; 
 	}	
 	return pdFALSE; 
@@ -369,65 +418,6 @@ uint16_t get_data_from_buffer(uint32_t index_adress)
 {
 	return adc_rawdata_buffer[index_adress % 320];
 }
-
-
-void decipher_ringbuffer_1symbol(uint16_t index , uint16_t first_zerophase, uint16_t idle_max_value) //daten auswerten
-{
-	//index welcher übergeben wird --> die nächsten 4 * 32 datenwerte auswerte == 1 byte
-	
-	uint16_t indexoffset = get_320_index(index);
-	
-	//uint8_t phase_faktor = start_index / 32; 
-	//uint16_t zero_index = firtzerophase + (i * 32);
-	
-	uint16_t y1 = 0;
-	uint16_t y2 = 0;
-	uint16_t y1_index = 0;
-	uint16_t y2_index = 0;
-	
-	uint16_t max_safe = 0;
-	uint16_t min_safe = 4096; //für erste if abfrage
-	
-	uint16_t max_index_safe = 0;
-	uint16_t min_index_safe = 0;
-	
-	uint16_t kontrolle_max = 0;
-	uint16_t kontrolle_min = 0;
-	bool Error_Flag = pdFALSE;
-	
-	for (uint8_t i = 0; i < 32; i++)
-	{
-		y1_index = i+indexoffset;
-		y2_index = i+1+indexoffset;
-		y1 = adc_rawdata_buffer[y1_index];
-		y2 = adc_rawdata_buffer[y2_index];
-		if ( (y2 > y1) & (y2 > max_safe)  )
-		{
-			max_safe = y2;
-			max_index_safe = y2_index;
-		}
-		else
-		{
-			if ( (y2 < y1) & (y2 < min_safe))
-			{
-				min_safe = y2;
-				min_index_safe = y2_index;
-			}
-		}
-	}
-	//uint8_t get_phase_maxindex( uint16_t index); 
-	
-	for (uint8_t i = 0; i < 32; i++)
-	{
-		
-	}
-}
-
-uint8_t get_symbol(uint16_t max_value , uint16_t max_value_2 , uint8_t phase)
-{
-	
-}
-
 
 
 

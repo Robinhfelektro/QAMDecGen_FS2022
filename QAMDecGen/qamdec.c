@@ -73,86 +73,92 @@ void vProtocolDecoder(void* pvParameters)
 	
 	for(;;)
 	{
-		if(xQueueReceive(receive_symbol_queue, &receive_symbol , portMAX_DELAY) == pdTRUE) 
+		while(uxQueueMessagesWaiting(receive_symbol_queue) > 0) 
 		{
-			switch(protocol_receive_state)
+			if(xQueueReceive(receive_symbol_queue, &receive_symbol , portMAX_DELAY) == pdTRUE) 
 			{
-				case PRS_IDLE:
-					if(receive_symbol == 1)  //1. Start Symbol
-					{
-						protocol_receive_state = PRS_1SBIT_CHECKED; 
-						lokal_receive_array[receive_index] = receive_symbol; 
-						receive_index++; 
-					}
-				break; 
+				switch(protocol_receive_state)
+				{
+					case PRS_IDLE:
+						if(receive_symbol == 1)  //1. Start Symbol
+						{
+							protocol_receive_state = PRS_1SBIT_CHECKED; 
+							lokal_receive_array[receive_index] = receive_symbol; 
+							receive_index++; 
+						}
+					break; 
 				
-				case PRS_1SBIT_CHECKED:      
-					if(receive_symbol == 2)  //2. Start Symbol
-					{
-						protocol_receive_state = PRS_2SBIT_CHECKED;
+					case PRS_1SBIT_CHECKED:      
+						if(receive_symbol == 2)  //2. Start Symbol
+						{
+							protocol_receive_state = PRS_2SBIT_CHECKED;
+							lokal_receive_array[receive_index] = receive_symbol;
+							receive_index++;
+						}
+						else
+						{
+							protocol_receive_state = PRS_IDLE; 
+							receive_index = 0;
+						}
+					break;
+					case PRS_2SBIT_CHECKED:
+					
+						//symbol 0,1 start
+						//2 und 3 ID
+						//4,5,6,7 length
 						lokal_receive_array[receive_index] = receive_symbol;
 						receive_index++;
-					}
-					else
-					{
-						protocol_receive_state = PRS_IDLE; 
-						receive_index = 0;
-					}
-				break;
-				case PRS_2SBIT_CHECKED:
 					
-					//symbol 0,1 start
-					//2 und 3 ID
-					//4,5,6,7 length
-					lokal_receive_array[receive_index] = receive_symbol;
-					receive_index++;
-					
-					if(receive_index == 8)
-					{
-						protocol_length =  lokal_receive_array[4] << 0;
-						protocol_length += lokal_receive_array[5] << 2;
-						protocol_length += lokal_receive_array[6] << 4;
-						protocol_length += lokal_receive_array[7] << 6;
-						protocol_receive_state = PRS_RECEIVED_DATA; 
-					}
-				break; 
-				case PRS_RECEIVED_DATA:
-				
-					lokal_receive_array[receive_index] = receive_symbol;
-					receive_index++;
-					if (receive_index == ((protocol_length*4) + 8))
-					{
-						protocol_receive_state = PRS_CHECK_SUM; 
-					}
-				break;
-				case PRS_CHECK_SUM:
-				
-					lokal_receive_array[receive_index] = receive_symbol;
-					receive_index++;
-					if (receive_index == (12 + (protocol_length * 4)) )    //	fix value = 12 symbol --> protokoll length,  10 * 4 symbol  --> berechnet											
-					{
-						checksum_received =  lokal_receive_array[8 + 0 +(protocol_length * 4) ] << 0;    
-						checksum_received += lokal_receive_array[8 + 1 +(protocol_length * 4) ] << 2;
-						checksum_received += lokal_receive_array[8 + 2 +(protocol_length * 4) ] << 4;
-						checksum_received += lokal_receive_array[8 + 3 +(protocol_length * 4) ] << 6;
-					
-						//Checksumme
-						for(int i = 0; i<8+(protocol_length*4); i++) 
+						if(receive_index == 8)
 						{
-							checksum_calculated += lokal_receive_array[i];
+							protocol_length =  lokal_receive_array[4] << 0;
+							protocol_length += lokal_receive_array[5] << 2;
+							protocol_length += lokal_receive_array[6] << 4;
+							protocol_length += lokal_receive_array[7] << 6;
+							protocol_receive_state = PRS_RECEIVED_DATA; 
 						}
-						if (checksum_calculated == checksum_received )
-						{
-							process_symbol_array(&lokal_receive_array[0], protocol_length);
-						}
-						protocol_receive_state = PRS_IDLE;
-						receive_index = 0; 
-					}
-				break;
+					break; 
+					case PRS_RECEIVED_DATA:
 				
+						lokal_receive_array[receive_index] = receive_symbol;
+						receive_index++;
+						if (receive_index == ((protocol_length*4) + 8))
+						{
+							protocol_receive_state = PRS_CHECK_SUM; 
+						}
+					break;
+					case PRS_CHECK_SUM:
+				
+						lokal_receive_array[receive_index] = receive_symbol;
+						receive_index++;
+						if (receive_index == (12 + (protocol_length * 4)) )    //	fix value = 12 symbol --> protokoll length,  10 * 4 symbol  --> berechnet											
+						{
+							checksum_received =  lokal_receive_array[8 + 0 +(protocol_length * 4) ] << 0;    
+							checksum_received += lokal_receive_array[8 + 1 +(protocol_length * 4) ] << 2;
+							checksum_received += lokal_receive_array[8 + 2 +(protocol_length * 4) ] << 4;
+							checksum_received += lokal_receive_array[8 + 3 +(protocol_length * 4) ] << 6;
+					
+							//Checksumme
+							for(int i = 0; i<8+(protocol_length*4); i++) 
+							{
+								checksum_calculated += lokal_receive_array[i];
+							}
+							if (checksum_calculated == checksum_received )
+							{
+								process_symbol_array(&lokal_receive_array[0], protocol_length);
+							}
+							protocol_receive_state = PRS_IDLE;
+							receive_index = 0; 
+						}
+					break;
+				}
+			}
+			else
+			{
+				vTaskDelay(1);
 			}
 		}
-		vTaskDelay( 20 / portTICK_RATE_MS );
+		vTaskDelay( 10 / portTICK_RATE_MS );
 	}
 }
 
@@ -194,6 +200,10 @@ void vQuamDec(void* pvParameters)
 					send_to_data_buffer( bufferelement[i] );
 				}
 			}
+			else
+			{
+				vTaskDelay(1); //test mit wait
+			}
 		}		
 		vTaskDelay( 2 / portTICK_RATE_MS );
 	}
@@ -225,7 +235,7 @@ void vQuamDecAnalysis(void* pvParameters)
 		{
 			case STATE_IDLE_INIT:
 				
-				if (raw_data_buffer_index >= 1000)
+				if (raw_data_buffer_index >= 10000)
 				{
 					if (raw_data_buffer_index >=  decoder_index + 200) //Warten auf neue Werte
 					{
@@ -280,43 +290,12 @@ void vQuamDecAnalysis(void* pvParameters)
 							//index korrektur funktion();
 							
 							
-							
-							//if ( (decoder_index + 96) < raw_data_buffer_index)  //mehr als 3ms hinterher
-							//{
-								//for (uint8_t i = 0; i < 5; i++)
-								//{
-									//if (decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset) == pdFALSE)
-									//{
-										//State_Switch = STATE_IDLE_INIT;  //fehler erkannt
-									//}
-									////decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset);
-									//decoder_index+= 32;
-								//}
-								//while_break = 1; 
-								//break; //geht das?
-							//}
-							//else
-							//{
-								//if (decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset) == pdFALSE)
-								//{
-									//State_Switch = STATE_IDLE_INIT;  //fehler erkannt
-								//}
-								////decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset);
-								//decoder_index+= 32;
-								////index korrektur funktion();
-								//
-								//while_break = 0; 
-							//}
-							//if (while_break)
-							//{
-								//break;
-							//}
 						}
 			break; 
 			default:
 			break; 
 		}
-		vTaskDelayUntil( &xLastWakeTime, 5 / portTICK_RATE_MS);
+		vTaskDelayUntil( &xLastWakeTime, 1 / portTICK_RATE_MS);
 	}
 }
 
@@ -360,26 +339,26 @@ bool decode_symbol_return( uint32_t zero_index, uint16_t max_value, uint16_t min
 	2 = 50%, 0°			 10
 	3 = 50%, 180°		 11
 	*/
-	uint16_t debug = adc_rawdata_buffer[get_320_index(zero_index)]; 
-	uint16_t debug1 = adc_rawdata_buffer[get_320_index(zero_index+8)]; 
+	//uint16_t debug = adc_rawdata_buffer[get_320_index(zero_index)]; 
+	//uint16_t debug1 = adc_rawdata_buffer[get_320_index(zero_index+8)]; 
 	uint16_t half_ampl_pos = ((max_value - dc_offset) >> 1) + dc_offset;  //durch 2, schneller und weniger leistung
 	uint16_t half_ampl_neg = dc_offset - ((max_value - dc_offset) >> 1);
-	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], max_value, 100 )) // 0 
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], max_value, 75 )) // 0 
 	{
 		*symbol_return = 0;
 		check++; 
 	}
-	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], min_value, 100 )) // 0
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], min_value, 75 )) // 0
 	{
 		*symbol_return = 1;
 		check++; 
 	}
-	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], half_ampl_pos, 100)) // 0
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], half_ampl_pos, 75)) // 0
 	{
 		*symbol_return = 2;
 		check++; 
 	}
-	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], half_ampl_neg, 100)) // 0
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], half_ampl_neg, 75)) // 0
 	{
 		*symbol_return = 3;
 		check++; 

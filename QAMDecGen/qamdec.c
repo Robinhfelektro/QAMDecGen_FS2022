@@ -36,20 +36,15 @@ TickType_t xLastWakeTime;
 
 
 //Funktionen initialisieren
-void send_to_data_buffer(uint16_t Data);
+void send_to_data_buffer(uint16_t Data, uint16_t index);
 uint16_t idle_calculate_offset(uint16_t max, uint16_t min);
-bool start_symbol_search(void);
-bool idel_check_all_zerophase(uint16_t max_index_check, uint16_t dc_offset, uint16_t* zerophase_index);
 uint32_t get_320_index(uint32_t index);
-bool idle_get_min_max(uint32_t index, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index);
 bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint32_t* zero_index);
 bool idle_check_all_zerophase_new(uint32_t* zero_index, uint16_t dc_offset, uint8_t check_strength);
-
 void process_symbol_array(uint8_t* symbol_array, uint8_t protocol_length);
 bool check_value_inrange(uint16_t value, uint16_t reference, uint16_t range);
-bool decode_ringbuffer_symbol_new(uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset);
-bool decode_symbol_return( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return );
-
+bool decode_ringbuffer_symbol_new(uint32_t* zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset);
+bool decode_symbol_return( uint32_t* zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return);
 
 
 #define PRS_IDLE				0
@@ -73,6 +68,7 @@ void vProtocolDecoder(void* pvParameters)
 	
 	for(;;)
 	{
+		PORTF.OUTCLR = PIN2_bm;
 		while(uxQueueMessagesWaiting(receive_symbol_queue) > 0) 
 		{
 			if(xQueueReceive(receive_symbol_queue, &receive_symbol , portMAX_DELAY) == pdTRUE) 
@@ -158,6 +154,7 @@ void vProtocolDecoder(void* pvParameters)
 				vTaskDelay(1);
 			}
 		}
+		PORTF.OUTSET = PIN2_bm;
 		vTaskDelay( 10 / portTICK_RATE_MS );
 	}
 }
@@ -176,37 +173,6 @@ void process_symbol_array(uint8_t* symbol_array, uint8_t protocol_length)
 	vDisplayWriteStringAtPos(0,0,"received string");
 	vDisplayWriteStringAtPos(1,0,"%s", received_string[0]);
 	//vDisplayWriteStringAtPos(1,0,"ResetReason: %s", received_string[0]);  //id übergeben
-}
-
-void vQuamDec(void* pvParameters)
-{
-	( void ) pvParameters;
-	
-	decoderQueue = xQueueCreate( 4, NR_OF_SAMPLES * sizeof(int16_t) );  //datenarray
-	
-	while(evDMAState == NULL) {
-		vTaskDelay(3/portTICK_RATE_MS);
-	}
-	
-	uint16_t bufferelement[NR_OF_SAMPLES];
-	
-	xEventGroupWaitBits(evDMAState, DMADECREADY, false, true, portMAX_DELAY);
-	
-	for(;;) {
-		while(uxQueueMessagesWaiting(decoderQueue) > 0) {
-			if(xQueueReceive(decoderQueue, &bufferelement[0], portMAX_DELAY) == pdTRUE) {  
-				for (uint8_t i = 0; i < 32; i++)
-				{	
-					send_to_data_buffer( bufferelement[i] );
-				}
-			}
-			else
-			{
-				vTaskDelay(1); //test mit wait
-			}
-		}		
-		vTaskDelay( 2 / portTICK_RATE_MS );
-	}
 }
 
 
@@ -231,8 +197,10 @@ void vQuamDecAnalysis(void* pvParameters)
 	
 	while (1)
 	{
+		PORTF.OUTCLR = PIN1_bm; 
 		switch(State_Switch)
 		{
+			
 			case STATE_IDLE_INIT:
 				
 				if (raw_data_buffer_index >= 10000)
@@ -240,7 +208,6 @@ void vQuamDecAnalysis(void* pvParameters)
 					if (raw_data_buffer_index >=  decoder_index + 200) //Warten auf neue Werte
 					{
 						decoder_index = raw_data_buffer_index - 100; //nach raw data buffer
-						
 						
 						if (idle_get_constant_values(decoder_index, &idle_max_value, &idle_min_value, &zero_phaseindex ))
 						{
@@ -270,42 +237,32 @@ void vQuamDecAnalysis(void* pvParameters)
 						}
 					}
 				}
-			
-				
-				
 			break; 
 			
 			case STATE_WAIT_STARTBIT:	
 						
 						while( (decoder_index + 40) < raw_data_buffer_index)
 						{
-							
-							
-							if (decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset) == pdFALSE)
+							if (decode_ringbuffer_symbol_new(&decoder_index, idle_max_value, idle_min_value, DC_Offset) == pdFALSE)
 							{
 								State_Switch = STATE_IDLE_INIT;  //fehler erkannt
 							}
-							//decode_ringbuffer_symbol_new(decoder_index, idle_max_value, idle_min_value, DC_Offset);
 							decoder_index+= 32;
-							//index korrektur funktion();
-							
-							
+							//sanity check funktion 1 mal 
 						}
 			break; 
 			default:
 			break; 
 		}
-		vTaskDelayUntil( &xLastWakeTime, 1 / portTICK_RATE_MS);
+		PORTF.OUTSET = PIN1_bm;
+		vTaskDelayUntil( &xLastWakeTime, 3 / portTICK_RATE_MS);
 	}
 }
 
 uint8_t global_testarray[100];
-bool decode_ringbuffer_symbol_new(uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset)
+bool decode_ringbuffer_symbol_new(uint32_t* zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset)
 {
-	
 	static uint8_t i = 0; 
-	
-	
 	uint8_t decoded_symbol = 0; 
 	if (decode_symbol_return(zero_index, max_value, min_value, dc_offset, &decoded_symbol))
 	{
@@ -326,13 +283,22 @@ bool decode_ringbuffer_symbol_new(uint32_t zero_index, uint16_t max_value, uint1
 }
 
 
-bool decode_symbol_return( uint32_t zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return )
+#define DECODE_RANGE 200
+#define CORRECTION_RANGE 250
+bool decode_symbol_return( uint32_t* zero_index, uint16_t max_value, uint16_t min_value, uint16_t dc_offset, uint8_t* symbol_return)
 {
-	uint8_t check = 0;  
-	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index)], dc_offset, 100 ) == 0) // 0 durchgang überprüfen +- 25 % abbweichung +-100
+	uint8_t check = 0;
+	uint16_t test = 0;
+	test = adc_rawdata_buffer[get_320_index(*zero_index + 8)];
+	uint16_t half_ampl_pos = ((max_value - dc_offset) >> 1) + dc_offset;  //durch 2, schneller und weniger leistung
+	uint16_t half_ampl_neg = dc_offset - ((max_value - dc_offset) >> 1);
+	
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(*zero_index)], dc_offset, 500 ) == 0) // 0 durchgang überprüfen +- 25 % abbweichung +-100
 	{
+		test = adc_rawdata_buffer[get_320_index(*zero_index)];
 		return pdFALSE;
 	}
+	
 	/*
 	0 = 100%, 0°         00
 	1 = 100%, 180°       01
@@ -341,27 +307,48 @@ bool decode_symbol_return( uint32_t zero_index, uint16_t max_value, uint16_t min
 	*/
 	//uint16_t debug = adc_rawdata_buffer[get_320_index(zero_index)]; 
 	//uint16_t debug1 = adc_rawdata_buffer[get_320_index(zero_index+8)]; 
-	uint16_t half_ampl_pos = ((max_value - dc_offset) >> 1) + dc_offset;  //durch 2, schneller und weniger leistung
-	uint16_t half_ampl_neg = dc_offset - ((max_value - dc_offset) >> 1);
-	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], max_value, 75 )) // 0 
+
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(*zero_index + 8)], max_value, DECODE_RANGE )) // 0 
 	{
 		*symbol_return = 0;
 		check++; 
 	}
-	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], min_value, 75 )) // 0
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(*zero_index + 8)], min_value, DECODE_RANGE )) // 0
 	{
 		*symbol_return = 1;
 		check++; 
 	}
-	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], half_ampl_pos, 75)) // 0
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(*zero_index + 8)], half_ampl_pos, DECODE_RANGE)) // 0
 	{
 		*symbol_return = 2;
 		check++; 
 	}
-	if (check_value_inrange(adc_rawdata_buffer[get_320_index(zero_index + 8)], half_ampl_neg, 75)) // 0
+	if (check_value_inrange(adc_rawdata_buffer[get_320_index(*zero_index + 8)], half_ampl_neg, DECODE_RANGE)) // 0
 	{
 		*symbol_return = 3;
 		check++; 
+	}
+	if ( (*symbol_return == 0) || (*symbol_return == 2) ) //2 mal 0 phase, (0 index + 16, kontrollieren --> grösser oder kleiner dc offset)
+	{
+		if ( adc_rawdata_buffer[get_320_index(*zero_index + 16)] > (dc_offset + CORRECTION_RANGE) )
+		{
+			*zero_index = *zero_index + 1;
+		}
+		else if ( adc_rawdata_buffer[get_320_index(*zero_index + 16)] < (dc_offset - CORRECTION_RANGE ))
+		{
+			*zero_index = *zero_index - 1;
+		}
+	}
+	if ((*symbol_return == 1) || (*symbol_return == 3)) //2 mal 180°
+	{
+		if ( adc_rawdata_buffer[get_320_index(*zero_index + 16)] > (dc_offset + CORRECTION_RANGE) )
+		{
+			*zero_index = *zero_index - 1;
+		}
+		else if ( adc_rawdata_buffer[get_320_index(*zero_index + 16)] < (dc_offset - CORRECTION_RANGE) )
+		{
+			*zero_index = *zero_index + 1;
+		}
 	}
 	if (check == 0)
 	{
@@ -387,10 +374,14 @@ uint32_t get_320_index(uint32_t index)
 	return index % 320;
 }
 
-void send_to_data_buffer(uint16_t Data)
+void send_to_data_buffer(uint16_t Data, uint16_t index)
 {
-	adc_rawdata_buffer[raw_data_buffer_index % 320] = Data;
+	adc_rawdata_buffer[index] = Data;
+	
 	raw_data_buffer_index++;
+	//uint16_t index = raw_data_buffer_index % 320;
+	//adc_rawdata_buffer[raw_data_buffer_index % 320] = Data;
+	//
 }
 
 uint16_t get_data_from_buffer(uint32_t index_adress)
@@ -421,56 +412,6 @@ bool idle_check_all_zerophase_new(uint32_t* zero_index, uint16_t dc_offset, uint
 }
 
 
-bool idel_check_all_zerophase(uint16_t max_index_check, uint16_t dc_offset, uint16_t* zerophase_index)
-{
-	uint16_t start_zerophase = 0; 
-	uint8_t zerophase_dedection_count = 0; 
-	bool b_first_index_too_low = pdFALSE; 
-	
-	if (max_index_check <= 7)
-	{
-		start_zerophase = max_index_check - 8 + 32; //nächster 0° durchgang
-		b_first_index_too_low = pdTRUE;
-	}
-	else
-	{
-		start_zerophase = max_index_check - 8;
-	}
-
-	for(uint8_t i = 0; i < 10; i++)
-	{
-		start_zerophase = start_zerophase - 32;
-		if (start_zerophase >= 321)  //overflow detected
-		{
-			if (b_first_index_too_low)
-			{
-				start_zerophase = (max_index_check - 8 + 32) - (i * 32);
-			}
-			else
-			{
-				start_zerophase =  (max_index_check - 8) - (i * 32);
-			}
-			break; 
-		}
-	}
-	for (uint8_t i = 0; i < 5; i++)  //alle 0 punkte koorinaten in einem Array speichern? wieder über pointer?
-	{
-		if (   (adc_rawdata_buffer[start_zerophase] > (dc_offset-100))  &  (adc_rawdata_buffer[start_zerophase] < (dc_offset+100)) ) //+- 100 von 4096 ca. 2.5% fehler
-		{
-			zerophase_dedection_count++; 
-		}
-		start_zerophase+= 32; 
-	}
-	if (zerophase_dedection_count == 5) //daten valide 
-	{
-		return pdTRUE;  //wenn berechnung ok 1
-		*zerophase_index = start_zerophase - (5 * 32); //startindex übergeben, - 5*32 um auf startwert zu kommen. 
-	}
-	else
-	{
-		return pdFALSE;
-	}
-}
 
 uint16_t idle_calculate_offset(uint16_t max, uint16_t min)
 {
@@ -508,8 +449,8 @@ bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint
 			}
 		}
 	}
-	if ( (adc_rawdata_buffer[get_320_index(max_index_safe+64)] > (max_safe-100)) & 
-		 (adc_rawdata_buffer[get_320_index(max_index_safe+64)] < (max_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler --> +64 für nächsten wert in tabelle
+	if ( (adc_rawdata_buffer[get_320_index(max_index_safe+64)] > (max_safe-200)) & 
+		 (adc_rawdata_buffer[get_320_index(max_index_safe+64)] < (max_safe+200)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler --> +64 für nächsten wert in tabelle
 	{
 		*max = max_safe;
 	}
@@ -517,8 +458,8 @@ bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint
 	{
 		return pdFALSE; 
 	}
-	if ( (adc_rawdata_buffer[get_320_index(min_index_safe+64)] > (min_safe-100)) & 
-		 (adc_rawdata_buffer[get_320_index(min_index_safe+64)] < (min_safe+100)) )  //kontrolle minimalwert +- 100 von 4096 ca. 2.5% fehler
+	if ( (adc_rawdata_buffer[get_320_index(min_index_safe+64)] > (min_safe-200)) & 
+		 (adc_rawdata_buffer[get_320_index(min_index_safe+64)] < (min_safe+200)) )  //kontrolle minimalwert +- 100 von 4096 ca. 2.5% fehler
 	{
 		*min = min_safe;
 	}
@@ -531,81 +472,60 @@ bool idle_get_constant_values(uint32_t index, uint16_t* max, uint16_t* min, uint
 }
 
 
-bool idle_get_min_max(uint32_t index, uint16_t* max, uint16_t* min, uint16_t* max_index, uint16_t* min_index)
+
+void vQuamDec(void* pvParameters)
 {
-	uint16_t y1 = 0; 
-	uint16_t y2 = 0; 
-	uint16_t y1_index = 0; 
-	uint16_t y2_index = 0; 
-	uint16_t max_safe = 0; 
-	uint16_t min_safe = 4096; //für erste if abfrage
-	uint16_t max_index_safe = 0; 
-	uint16_t min_index_safe = 0; 
-	uint16_t kontrolle_max = 0; 
-	uint16_t kontrolle_min = 0; 
-	uint16_t indexoffset = get_320_index(index);
-	bool Error_Flag = pdFALSE; 
+	( void ) pvParameters;
 	
+	//decoderQueue = xQueueCreate( 4, NR_OF_SAMPLES * sizeof(int16_t) );  //datenarray
 	
-	for (uint8_t i = 0; i < 64; i++)
-	{
-		y1_index = i+indexoffset;
-		y2_index = i+1+indexoffset;
-		y1 = adc_rawdata_buffer[y1_index];
-		y2 = adc_rawdata_buffer[y2_index];
-		if ( (y2 > y1) & (y2 > max_safe)  )
-		{
-			max_safe = y2; 
-			max_index_safe = y2_index; 
-		}
-		else
-		{
-			if ( (y2 < y1) & (y2 < min_safe))
-			{
-				min_safe = y2; 
-				min_index_safe = y2_index;
- 			}
-		}
+	while(evDMAState == NULL) {
+		vTaskDelay(3/portTICK_RATE_MS);
 	}
-	kontrolle_max = adc_rawdata_buffer[max_index_safe+64];  //Werte für kontrolle kopieren
-	kontrolle_min = adc_rawdata_buffer[min_index_safe+64];
-	if ( (kontrolle_max > (max_safe-100)) & (kontrolle_max < (max_safe+100)) )  //kontrolle maximalwert +- 100 von 4096 ca. 2.5% fehler
-	{
-		*max = max_safe;
-		*max_index = max_index_safe; 
-		return pdTRUE;
-	}
-	if ( (kontrolle_min > (min_safe-100)) & (kontrolle_min < (min_safe+100)) )  //kontrolle minimalwert +- 100 von 4096 ca. 2.5% fehler
-	{
-		*min = min_safe; 
-		*min_index = min_index_safe; 
-		return pdTRUE;
-	}
-	return Error_Flag; // 1 = ok, 0 = fehler
-}
-
-
-void get_slope(uint16_t index_0to319)  //
-{
 	
-}
-
-
-
-void get_sin_mean(uint16_t index)
-{
-	//12 bit adc --> 4096 max wert
-	for (uint8_t i = 0; i < 32; i++)
-	{
+	uint16_t bufferelement[NR_OF_SAMPLES];
+	
+	xEventGroupWaitBits(evDMAState, DMADECREADY, false, true, portMAX_DELAY);
+	
+	for(;;) {
 		
+		PORTF.OUTCLR = PIN0_bm; 
+		
+		////while(uxQueueMessagesWaiting(decoderQueue) > 0) {
+		//uint32_t decodecount = uxQueueMessagesWaiting(decoderQueue);
+		//for(uint32_t j = 0; j < decodecount;j++) {
+			//if(xQueueReceive(decoderQueue, &bufferelement[0], portMAX_DELAY) == pdTRUE) {  
+				//for (uint8_t i = 0; i < 32; i++)
+				//{	
+					//send_to_data_buffer( bufferelement[i] );
+				//}
+			//}
+			//else
+			//{
+				////vTaskDelay(1); //test mit wait
+			//}
+		//}	
+		PORTF.OUTSET = PIN0_bm; 	
+		vTaskDelay( 2 / portTICK_RATE_MS );
 	}
 }
+
 
 void fillDecoderQueue(uint16_t buffer[NR_OF_SAMPLES])
 {
-	BaseType_t xTaskWokenByReceive = pdFALSE;
-
-	xQueueSendFromISR( decoderQueue, &buffer[0], &xTaskWokenByReceive );
+	PORTF.OUTCLR = PIN3_bm;
+	uint16_t index = raw_data_buffer_index % 320;
+	for (uint8_t i = 0; i < 32; i++)
+	{
+		if (index > 320)
+		{
+			index = 0;
+		}
+		adc_rawdata_buffer[index] = buffer[i];
+		index++;
+		raw_data_buffer_index++;
+	}
+	PORTF.OUTSET = PIN3_bm; 
 }
 
 ISR(DMA_CH2_vect)

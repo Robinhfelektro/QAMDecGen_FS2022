@@ -178,7 +178,7 @@ void process_symbol_array(uint8_t* symbol_array, uint8_t protocol_length)
 
 
 #define STATE_IDLE_INIT 1
-#define STATE_WAIT_STARTBIT 2
+#define STATE_DECODE_RINGBUFFER 2
 void vQuamDecAnalysis(void* pvParameters)
 {
 	
@@ -227,7 +227,7 @@ void vQuamDecAnalysis(void* pvParameters)
 							if (idle_check_all_zerophase_new(&zero_phaseindex, DC_Offset, 5 ) )  //wenn 0 phase ok == 1
 							{
 								//next mode --> wait for start bit
-								State_Switch = STATE_WAIT_STARTBIT; 
+								State_Switch = STATE_DECODE_RINGBUFFER; 
 								decoder_index = zero_phaseindex;
 							}
 							else
@@ -239,8 +239,7 @@ void vQuamDecAnalysis(void* pvParameters)
 				}
 			break; 
 			
-			case STATE_WAIT_STARTBIT:	
-						
+			case STATE_DECODE_RINGBUFFER:	
 						while( (decoder_index + 40) < raw_data_buffer_index)
 						{
 							if (decode_ringbuffer_symbol_new(&decoder_index, idle_max_value, idle_min_value, DC_Offset) == pdFALSE)
@@ -531,7 +530,6 @@ void fillDecoderQueue(uint16_t buffer[NR_OF_SAMPLES])
 ISR(DMA_CH2_vect)
 {
 	DMA.CH2.CTRLB|=0x10;
-
 	fillDecoderQueue( &adcBuffer0[0] );  //globaler adc, DMA Buffer
 }
 

@@ -148,7 +148,7 @@ void fillBuffer(uint16_t buffer[NR_OF_SAMPLES]) {
 
 void Create_Send_Data(){
 	SendID++;
-	char senddata[11] = "HelloWorld\0";
+	char senddata[12] = "QAM Plunder\0";
 	uint8_t datalen = strlen(senddata);
 	sendbuffer_size_sending = 12 + (datalen*4);
 	//Start-Signal

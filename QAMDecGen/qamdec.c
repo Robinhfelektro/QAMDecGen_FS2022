@@ -141,7 +141,7 @@ void vProtocolDecoder(void* pvParameters)
 							}
 							if (checksum_calculated == checksum_received )
 							{
-								process_symbol_array(&lokal_receive_array[0], protocol_length);
+								process_symbol_array(&lokal_receive_array[0], protocol_length);  //protocol_length
 							}
 							protocol_receive_state = PRS_IDLE;
 							receive_index = 0; 
@@ -169,9 +169,15 @@ void process_symbol_array(uint8_t* symbol_array, uint8_t protocol_length)
 		received_string[i] +=  symbol_array[8 + 2 +(i * 4) ] << 4;
 		received_string[i] +=  symbol_array[8 + 3 +(i * 4) ] << 6;
 	}
+	for (uint8_t i = 0; i <(24 - protocol_length); i++) //setzt rest auf 0
+	{
+		received_string[i+protocol_length] = 0; 
+	}
+	taskENTER_CRITICAL();  //test mit critical section für lcd --> gaaaht nöd
 	vDisplayClear();
 	vDisplayWriteStringAtPos(0,0,"received string");
-	vDisplayWriteStringAtPos(1,0,"%s", received_string[0]);
+	vDisplayWriteStringAtPos(1,0,"%s", &received_string[0]);
+	taskEXIT_CRITICAL();
 	//vDisplayWriteStringAtPos(1,0,"ResetReason: %s", received_string[0]);  //id übergeben
 }
 
@@ -486,26 +492,21 @@ void vQuamDec(void* pvParameters)
 	
 	xEventGroupWaitBits(evDMAState, DMADECREADY, false, true, portMAX_DELAY);
 	
-	for(;;) {
-		
+	uint8_t lcd_count = 0; 
+	for(;;)
+	{
 		PORTF.OUTCLR = PIN0_bm; 
-		
-		////while(uxQueueMessagesWaiting(decoderQueue) > 0) {
-		//uint32_t decodecount = uxQueueMessagesWaiting(decoderQueue);
-		//for(uint32_t j = 0; j < decodecount;j++) {
-			//if(xQueueReceive(decoderQueue, &bufferelement[0], portMAX_DELAY) == pdTRUE) {  
-				//for (uint8_t i = 0; i < 32; i++)
-				//{	
-					//send_to_data_buffer( bufferelement[i] );
-				//}
-			//}
-			//else
-			//{
-				////vTaskDelay(1); //test mit wait
-			//}
-		//}	
+		//if (lcd_count == 100)  //test für lcd Ausgabe
+		//{
+			//taskENTER_CRITICAL();
+			//vDisplayClear();
+			//vDisplayWriteStringAtPos(0,0,"FreeRTOS 10.0.1");
+			//lcd_count = 0; 
+			//taskEXIT_CRITICAL();
+		//}
+		//lcd_count++; 
 		PORTF.OUTSET = PIN0_bm; 	
-		vTaskDelay( 2 / portTICK_RATE_MS );
+		vTaskDelay(10/portTICK_RATE_MS);
 	}
 }
 
